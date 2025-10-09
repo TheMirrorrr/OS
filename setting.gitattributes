@@ -1,0 +1,16 @@
+# 所有代码文件统一 LF
+*.c     text eol=lf
+*.h     text eol=lf
+*.cpp   text eol=lf
+*.java  text eol=lf
+*.py    text eol=lf
+*.sh    text eol=lf
+
+# 文本文件也统一 LF
+*.txt   text eol=lf
+*.md    text eol=lf
+
+# 二进制文件保持原样
+*.png   binary
+*.jpg   binary
+*.exe   binary
