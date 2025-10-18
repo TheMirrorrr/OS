@@ -33,8 +33,9 @@ const struct pmm_manager *pmm_manager;
 static void check_alloc_page(void);
 
 // init_pmm_manager - initialize a pmm_manager instance
+//我们修改这段代码，将当前的内存管理器设置为Best-Fit算法的实现，并调用其初始化函数。 :2310511
 static void init_pmm_manager(void) {
-    pmm_manager = &default_pmm_manager;
+    pmm_manager = &best_fit_pmm_manager;
     cprintf("memory management: %s\n", pmm_manager->name);
     pmm_manager->init();
 }
