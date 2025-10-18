@@ -74,9 +74,9 @@ best_fit_init_memmap(struct Page *base, size_t n) {
         assert(PageReserved(p));
         /*LAB2 EXERCISE 2: 2310511*/ 
         // 清空当前页框的标志和属性信息，并将页框的引用计数设置为0
-        p->flags = 0; //这行代码是清空当前页框的标志
-        set_page_ref(p, 0); //这行代码是将页框的引用计数设置为0
-        ClearPageProperty(p); //这行代码是清除当前页框的属性信息
+        p->flags = 0; //清空当前页框的标志
+        set_page_ref(p, 0); //将页框的引用计数设置为0
+        ClearPageProperty(p); //清除当前页框的属性信息
     }
     base->property = n;
     SetPageProperty(base);
