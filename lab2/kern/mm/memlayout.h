@@ -25,17 +25,19 @@
 
 typedef uintptr_t pte_t;
 typedef uintptr_t pde_t;
+typedef struct Page Page;     // 前向声明 Page
+typedef struct buddy2 buddy2; // typedef buddy2
+
 
 /* *
- * struct Page - Page descriptor structures. Each Page describes one
- * physical page. In kern/mm/pmm.h, you can find lots of useful functions
- * that convert Page to other data types, such as physical address.
+ * struct Page - 页描述符结构。每个 Page 描述一个物理页。
+ * 在 kern/mm/pmm.h 中，你可以找到许多将 Page 转换为其他数据类型（例如物理地址）的有用函数。
  * */
 struct Page {
-    int ref;                        // page frame's reference counter
-    uint64_t flags;                 // array of flags that describe the status of the page frame
-    unsigned int property;          // the num of free block, used in first fit pm manager
-    list_entry_t page_link;         // free list link
+    int ref;                        // 页框的引用计数器
+    uint64_t flags;                 // 描述页框状态的标志数组
+    unsigned int property;          // 空闲块的数量，用于首次适配内存管理器
+    list_entry_t page_link;         // 空闲链表链接
 };
 
 /* Flags describing the status of a page frame */
@@ -58,6 +60,18 @@ typedef struct {
     list_entry_t free_list;         // the list header
     unsigned int nr_free;           // number of free pages in this free list
 } free_area_t;
+
+struct buddy2 {
+  unsigned size;// 管理内存的总单元数目
+  unsigned longest[1];// 每个节点记录该节点所管理的内存块中最大空闲块的大小  
+};
+
+typedef struct{
+    Page* base; // buddy system内存池的起始地址
+    buddy2* root; // buddy system内存池的管理结构
+    unsigned int nr_free; // 空闲页数
+    unsigned int total_size; // 总页数
+} buddy_system_t;
 
 #endif /* !__ASSEMBLER__ */
 
