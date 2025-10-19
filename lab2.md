@@ -67,6 +67,7 @@ static struct Page *default_alloc_pages(size_t n)
 ### 实现原理
 Best-Fit算法的核心思想是每次分配内存时，选择最小的能够满足请求的空闲块，从而减少内存碎片。
 而我们的实验是按内存地址排序的链表，并通过完整遍历来找到最佳块。简单来说就是，遍历寻找满足要求的块，在满足要求的块中选择最小的块进行分配。
+这个算法的流程如下：初始化 → 内存映射初始化 → 分配请求 → 释放内存 → 合并优化。
 
 ### 实验过程
 本次实验中，我们需要填写5个代码块，可以参考first fit算法的实现，来补充代码，代码分别是：
@@ -138,6 +139,15 @@ static void init_pmm_manager(void) {
 }
 ```
 这段代码是初始化物理内存管理器，将当前的内存管理器设置为Best-Fit算法的实现，并调用其初始化函数。
+
+至此，我们得到了Best-Fit的完整流程：
+best_fit_init() → 创建空链表，计数器归零
+best_fit_init_memmap() → 初始化可用内存区域
+best_fit_alloc_pages() → 遍历链表寻找最匹配块，分割剩余部分
+best_fit_free_pages() → 释放页面，按地址插入链表，执行前后合并
+best_fit_nr_free_pages() → 统计空闲页面
+best_fit_check() → 验证算法正确性
+
 我们在lab2文件夹中通过终端，输入指令：
 ```bash
 make grade
