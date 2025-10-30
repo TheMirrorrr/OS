@@ -8,8 +8,10 @@
 #include <riscv.h>
 #include <stdio.h>
 #include <trap.h>
+#include <sbi.h>
 
 #define TICK_NUM 100
+volatile size_t num = 0;//与clock.c中的ticks一样定义
 
 static void print_ticks() {
     cprintf("%d ticks\n", TICK_NUM);
@@ -43,9 +45,25 @@ void idt_init(void) {
      *     Notice: the argument of lidt is idt_pd. try to find it!
      */
 
+    /* (1) 每个中断服务例程（ISR）的入口地址在哪里？
+     *     所有 ISR 的入口地址都保存在 __vectors 中。uintptr_t __vectors[] 在哪里？
+     *     __vectors[] 位于 kern/trap/vector.S，由 tools/vector.c 生成。
+     *     （在 lab3 目录运行 "make"，你会在 kern/trap 目录下找到 vector.S）
+     *     你可以使用 "extern uintptr_t __vectors[];" 来声明这个外部变量，稍后会用到它。
+     * (2) 现在你应该在中断描述表（IDT）中设置每个 ISR 的条目。
+     *     你能在此文件中看到 idt[256] 吗？是的，那就是 IDT！你可以使用 SETGATE 宏来设置 IDT 的每一项。
+     * (3) 在设置完 IDT 的内容后，需要通过 'lidt' 指令让 CPU 知道 IDT 的位置。
+     *     不清楚该指令的含义？可以搜索相关资料！并查看 libs/x86.h 以获取更多信息。
+     *     注意：lidt 的参数是 idt_pd。尝试找到它！
+     */
+
     extern void __alltraps(void);
     /* Set sup0 scratch register to 0, indicating to exception vector
        that we are presently executing in the kernel */
+    //约定：若中断前处于S态，sscratch为0
+    //若中断前处于U态，sscratch存储内核栈地址
+    //那么之后就可以通过sscratch的数值判断是内核态产生的中断还是用户态产生的中断
+    //我们现在是内核态所以给sscratch置零
     write_csr(sscratch, 0);
     /* Set the exception vector address */
     write_csr(stvec, &__alltraps);
@@ -101,22 +119,22 @@ void print_regs(struct pushregs *gpr) {
 }
 
 void interrupt_handler(struct trapframe *tf) {
-    intptr_t cause = (tf->cause << 1) >> 1;
+    intptr_t cause = (tf->cause << 1) >> 1;//抹掉scause最高位代表“这是中断不是异常”的1
     switch (cause) {
         case IRQ_U_SOFT:
-            cprintf("User software interrupt\n");
+            cprintf("User software interrupt\n");//来自用户态的软中断
             break;
         case IRQ_S_SOFT:
-            cprintf("Supervisor software interrupt\n");
+            cprintf("Supervisor software interrupt\n");//来自内核态的软中断
             break;
         case IRQ_H_SOFT:
-            cprintf("Hypervisor software interrupt\n");
+            cprintf("Hypervisor software interrupt\n");//来自虚拟机态的软中断
             break;
         case IRQ_M_SOFT:
-            cprintf("Machine software interrupt\n");
+            cprintf("Machine software interrupt\n");//来自机器态的软中断
             break;
         case IRQ_U_TIMER:
-            cprintf("User Timer interrupt\n");
+            cprintf("User Timer interrupt\n");//来自用户态的定时器中断
             break;
         case IRQ_S_TIMER:
             // "All bits besides SSIP and USIP in the sip register are
@@ -124,30 +142,39 @@ void interrupt_handler(struct trapframe *tf) {
             // In fact, Call sbi_set_timer will clear STIP, or you can clear it
             // directly.
             // cprintf("Supervisor timer interrupt\n");
-             /* LAB3 EXERCISE1   YOUR CODE :  */
+             /* LAB3 EXERCISE1   YOUR CODE :2312823  */
             /*(1)设置下次时钟中断- clock_set_next_event()
              *(2)计数器（ticks）加一
              *(3)当计数器加到100的时候，我们会输出一个`100ticks`表示我们触发了100次时钟中断，同时打印次数（num）加一
             * (4)判断打印次数，当打印次数为10时，调用<sbi.h>中的关机函数关机
             */
-            break;
+           clock_set_next_event();
+           ticks++;
+           if(ticks % TICK_NUM == 0){
+               print_ticks();
+               num++;
+               if(num == 10){
+                   sbi_shutdown();
+               }
+           }
+           break;
         case IRQ_H_TIMER:
-            cprintf("Hypervisor software interrupt\n");
+            cprintf("Hypervisor software interrupt\n");//来自虚拟机态的定时器中断
             break;
         case IRQ_M_TIMER:
-            cprintf("Machine software interrupt\n");
+            cprintf("Machine software interrupt\n");//来自机器态的定时器中断
             break;
         case IRQ_U_EXT:
-            cprintf("User software interrupt\n");
+            cprintf("User software interrupt\n");//来自用户态的外部中断
             break;
         case IRQ_S_EXT:
-            cprintf("Supervisor external interrupt\n");
+            cprintf("Supervisor external interrupt\n");//来自内核态的外部中断
             break;
         case IRQ_H_EXT:
-            cprintf("Hypervisor software interrupt\n");
+            cprintf("Hypervisor software interrupt\n");//来自虚拟机态的外部中断
             break;
         case IRQ_M_EXT:
-            cprintf("Machine software interrupt\n");
+            cprintf("Machine software interrupt\n");//来自机器态的外部中断
             break;
         default:
             print_trapframe(tf);
@@ -163,19 +190,25 @@ void exception_handler(struct trapframe *tf) {
             break;
         case CAUSE_ILLEGAL_INSTRUCTION:
              // 非法指令异常处理
-             /* LAB3 CHALLENGE3   YOUR CODE :  */
+             /* LAB3 CHALLENGE3   YOUR CODE :2312823  */
             /*(1)输出指令异常类型（ Illegal instruction）
              *(2)输出异常指令地址
              *(3)更新 tf->epc寄存器
             */
+            cprintf("Exception type:Illegal instruction\n");
+            cprintf("“Illegal instruction caught at 0x%08x\n", tf->epc);
+            tf->epc += 4;
             break;
         case CAUSE_BREAKPOINT:
             //断点异常处理
-            /* LAB3 CHALLLENGE3   YOUR CODE :  */
+            /* LAB3 CHALLENGE3   YOUR CODE :2312823  */
             /*(1)输出指令异常类型（ breakpoint）
              *(2)输出异常指令地址
              *(3)更新 tf->epc寄存器
             */
+            cprintf("Exception type: breakpoint\n");
+            cprintf("ebreak caught at 0x%08x\n", tf->epc);
+            tf->epc += 2;
             break;
         case CAUSE_MISALIGNED_LOAD:
             break;
@@ -200,6 +233,7 @@ void exception_handler(struct trapframe *tf) {
 }
 
 static inline void trap_dispatch(struct trapframe *tf) {
+    //scause的最高位是1，说明trap是由中断引起的
     if ((intptr_t)tf->cause < 0) {
         // interrupts
         interrupt_handler(tf);
@@ -210,10 +244,13 @@ static inline void trap_dispatch(struct trapframe *tf) {
 }
 
 /* *
- * trap - handles or dispatches an exception/interrupt. if and when trap()
- * returns,
- * the code in kern/trap/trapentry.S restores the old CPU state saved in the
- * trapframe and then uses the iret instruction to return from the exception.
+ * trap - Handles or dispatches an exception/interrupt. If and when trap()
+ * returns, the code in kern/trap/trapentry.S restores the old CPU state
+ * saved in the trapframe and then uses the iret instruction to return
+ * from the exception.
+ *
+ * trap - 处理或分发异常/中断。当 trap() 返回时，kern/trap/trapentry.S 中的代码
+ * 将恢复保存在 trapframe 中的旧 CPU 状态，然后使用 iret 指令从异常中返回。
  * */
 void trap(struct trapframe *tf) {
     // dispatch based on what type of trap occurred

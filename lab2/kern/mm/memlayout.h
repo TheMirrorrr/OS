@@ -40,16 +40,16 @@ struct Page {
     list_entry_t page_link;         // 空闲链表链接
 };
 
-/* Flags describing the status of a page frame */
-#define PG_reserved                 0       // if this bit=1: the Page is reserved for kernel, cannot be used in alloc/free_pages; otherwise, this bit=0 
-#define PG_property                 1       // if this bit=1: the Page is the head page of a free memory block(contains some continuous_addrress pages), and can be used in alloc_pages; if this bit=0: if the Page is the the head page of a free memory block, then this Page and the memory block is alloced. Or this Page isn't the head page.
+/* 描述页框状态的标志 */
+#define PG_reserved                 0       // 若该位=1：该 Page 被内核保留，不能用于 alloc/free_pages；若该位=0：表示未被保留
+#define PG_property                 1       // 若该位=1：该 Page 是空闲内存块的首页（包含若干连续页），可用于 alloc_pages；若该位=0：要么该 Page 不是空闲块的首页，要么该空闲块已被分配
 
-#define SetPageReserved(page)       ((page)->flags |= (1UL << PG_reserved))
-#define ClearPageReserved(page)     ((page)->flags &= ~(1UL << PG_reserved))
-#define PageReserved(page)          (((page)->flags >> PG_reserved) & 1)
-#define SetPageProperty(page)       ((page)->flags |= (1UL << PG_property))
-#define ClearPageProperty(page)     ((page)->flags &= ~(1UL << PG_property))
-#define PageProperty(page)          (((page)->flags >> PG_property) & 1)
+#define SetPageReserved(page)       ((page)->flags |= (1UL << PG_reserved)) // 设置页为保留状态
+#define ClearPageReserved(page)     ((page)->flags &= ~(1UL << PG_reserved))  // 设置页为非保留状态
+#define PageReserved(page)          (((page)->flags >> PG_reserved) & 1)         // 判断页是否为保留状态
+#define SetPageProperty(page)       ((page)->flags |= (1UL << PG_property))  // 设置页为属性页
+#define ClearPageProperty(page)     ((page)->flags &= ~(1UL << PG_property)) // 设置页为非属性页
+#define PageProperty(page)          (((page)->flags >> PG_property) & 1)      // 判断页是否为属性页
 
 // convert list entry to page
 #define le2page(le, member)                 \

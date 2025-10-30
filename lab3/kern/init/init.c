@@ -25,15 +25,20 @@ int kern_init(void) {
 
     print_kerninfo();
 
-    // grade_backtrace();
-    idt_init();  // init interrupt descriptor table
+    // grade_backtrace(); // 用于测试的栈回溯函数，当前被注释掉
+    idt_init();  // 初始化中断描述符表（IDT），设置中断向量和处理函数
 
-    pmm_init();  // init physical memory management
+    pmm_init();  // 初始化物理内存管理（PMM），建立内存空闲/分配数据结构
 
-    idt_init();  // init interrupt descriptor table
+    idt_init();  // 再次初始化 IDT（保留原代码，若为重复调用可考虑删除）
 
-    clock_init();   // init clock interrupt
-    intr_enable();  // enable irq interrupt
+    clock_init();   // 初始化时钟中断，设置时钟硬件和定时器
+    intr_enable();  // 使能外部中断（IRQ），允许处理器响应中断请求
+    // LAB3: CAHLLENGE 1 If you try to do it, uncomment lab3_switch_test()
+    // user/kernel mode switch test
+    // lab3_switch_test();
+    asm("ebreak");//触发断点异常
+    asm("mret");//触发非法指令异常
 
     /* do nothing */
     while (1)
