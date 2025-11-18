@@ -175,16 +175,26 @@ void proc_run(struct proc_struct *proc)
 {
     if (proc != current)
     {
-        // LAB4:EXERCISE3 YOUR CODE
+        // LAB4:EXERCISE3 2312823
         /*
          * Some Useful MACROs, Functions and DEFINEs, you can use them in below implementation.
          * MACROs or Functions:
-         *   local_intr_save():        Disable interrupts
-         *   local_intr_restore():     Enable Interrupts
-         *   lsatp():                   Modify the value of satp register
-         *   switch_to():              Context switching between two processes
+         *   local_intr_save():        Disable interrupts // 禁用中断 /kern/sync/sync.h
+         *   local_intr_restore():     Enable Interrupts  // 启用中断 /kern/sync/sync.h
+         *   lsatp():                  Modify the value of satp register // 修改satp寄存器的值 /libs/riscv.h
+         *   switch_to():              Context switching between two processes // 在两个进程之间进行上下文切换 /kern/process/switch.S
          */
+        bool flag;//禁用和启动中断的标志变量
+        local_intr_save(flag);//保存并禁用中断
 
+        struct proc_struct *current_proc = current;
+        current = proc;
+
+        lsatp(proc->pgdir);//将下一个要运行进程的 pgdir 值加载到 satp 寄存器中
+
+        switch_to($(current_proc->context), $(proc->context));//进行进程上下文切换，使用指针以修改原始值
+
+        local_intr_restore(flag);//恢复中断状态
     }
 }
 

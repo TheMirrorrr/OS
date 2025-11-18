@@ -241,9 +241,12 @@
 
 #define barrier() __asm__ __volatile__("fence" ::: "memory")
 
+// 设置 satp 寄存器的值，用于设置页表基地址
+// 参数 pgdir 是页表的基地址
 static inline void
 lsatp(unsigned int pgdir)
 {
+  // 将 satp 寄存器设置为 SV32 模式，并将 pgdir 右移 RISCV_PGSHIFT 位后写入
   write_csr(satp, SATP32_MODE | (pgdir >> RISCV_PGSHIFT));
 }
 
