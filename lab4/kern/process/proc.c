@@ -88,7 +88,7 @@ alloc_proc(void)
     struct proc_struct *proc = kmalloc(sizeof(struct proc_struct));
     if (proc != NULL)
     {
-        // LAB4:EXERCISE1 YOUR CODE
+        // LAB4:EXERCISE1 2310511
         /*
          * below fields in proc_struct need to be initialized
          *       enum proc_state state;                      // Process state
@@ -104,7 +104,18 @@ alloc_proc(void)
          *       uint32_t flags;                             // Process flag
          *       char name[PROC_NAME_LEN + 1];               // Process name
          */
-        
+        proc->pgdir = boot_pgdir_pa;
+        proc->tf = NULL;
+        proc->state = PROC_UNINIT;
+        proc->pid = -1;
+        proc->runs = 0;
+        proc->kstack = 0;
+        proc->need_resched = 0;
+        proc->parent = NULL;
+        proc->mm = NULL;
+        proc->flags = 0;
+        memset(&(proc->context), 0, sizeof(struct context));
+        memset(proc->name, 0, PROC_NAME_LEN + 1);
     }
     return proc;
 }
@@ -192,7 +203,7 @@ void proc_run(struct proc_struct *proc)
 
         lsatp(proc->pgdir);//将下一个要运行进程的 pgdir 值加载到 satp 寄存器中
 
-        switch_to($(current_proc->context), $(proc->context));//进行进程上下文切换，使用指针以修改原始值
+        switch_to(&current_proc->context, &proc->context);//进行进程上下文切换，使用指针以修改原始值
 
         local_intr_restore(flag);//恢复中断状态
     }
