@@ -81,7 +81,7 @@ void kernel_thread_entry(void);
 void forkrets(struct trapframe *tf);
 void switch_to(struct context *from, struct context *to);
 
-// alloc_proc - alloc a proc_struct and init all fields of proc_struct
+// alloc_proc - alloc a proc_struct and init all fields of proc_struct //分配一个 proc_struct 并初始化 proc_struct 的所有字段
 static struct proc_struct *
 alloc_proc(void)
 {
@@ -91,18 +91,18 @@ alloc_proc(void)
         // LAB4:EXERCISE1 2310511
         /*
          * below fields in proc_struct need to be initialized
-         *       enum proc_state state;                      // Process state
-         *       int pid;                                    // Process ID
-         *       int runs;                                   // the running times of Proces
-         *       uintptr_t kstack;                           // Process kernel stack
-         *       volatile bool need_resched;                 // bool value: need to be rescheduled to release CPU?
-         *       struct proc_struct *parent;                 // the parent process
-         *       struct mm_struct *mm;                       // Process's memory management field
-         *       struct context context;                     // Switch here to run process
-         *       struct trapframe *tf;                       // Trap frame for current interrupt
-         *       uintptr_t pgdir;                            // the base addr of Page Directroy Table(PDT)
-         *       uint32_t flags;                             // Process flag
-         *       char name[PROC_NAME_LEN + 1];               // Process name
+         *       enum proc_state state;                      // Process state 进程状态
+         *       int pid;                                    // Process ID 进程ID
+         *       int runs;                                   // the running times of Proces 进程运行次数
+         *       uintptr_t kstack;                           // Process kernel stack 进程内核栈
+         *       volatile bool need_resched;                 // bool value: need to be rescheduled to release CPU? 是否需要重新调度以释放CPU
+         *       struct proc_struct *parent;                 // the parent process 父进程
+         *       struct mm_struct *mm;                       // Process's memory management field 进程的内存管理字段
+         *       struct context context;                     // Switch here to run process 切换到这里以运行进程
+         *       struct trapframe *tf;                       // Trap frame for current interrupt 当前中断的陷阱帧
+         *       uintptr_t pgdir;                            // the base addr of Page Directroy Table(PDT) 页目录表（PDT）的基本地址
+         *       uint32_t flags;                             // Process flag 进程标志
+         *       char name[PROC_NAME_LEN + 1];               // Process name 进程名称
          */
         proc->pgdir = boot_pgdir_pa;
         proc->tf = NULL;
@@ -120,7 +120,7 @@ alloc_proc(void)
     return proc;
 }
 
-// set_proc_name - set the name of proc
+// set_proc_name - set the name of proc  //设置进程的名称
 char *
 set_proc_name(struct proc_struct *proc, const char *name)
 {
@@ -128,7 +128,7 @@ set_proc_name(struct proc_struct *proc, const char *name)
     return memcpy(proc->name, name, PROC_NAME_LEN);
 }
 
-// get_proc_name - get the name of proc
+// get_proc_name - get the name of proc //获取进程的名称
 char *
 get_proc_name(struct proc_struct *proc)
 {
@@ -137,7 +137,7 @@ get_proc_name(struct proc_struct *proc)
     return memcpy(name, proc->name, PROC_NAME_LEN);
 }
 
-// get_pid - alloc a unique pid for process
+// get_pid - alloc a unique pid for process //为进程分配一个唯一的 pid
 static int
 get_pid(void)
 {
@@ -180,8 +180,8 @@ get_pid(void)
     return last_pid;
 }
 
-// proc_run - make process "proc" running on cpu
-// NOTE: before call switch_to, should load  base addr of "proc"'s new PDT
+// proc_run - make process "proc" running on cpu //使进程 "proc" 在 CPU 上运行
+// NOTE: before call switch_to, should load  base addr of "proc"'s new PDT //在调用 switch_to 之前，应加载 "proc" 的新 PDT 的基本地址
 void proc_run(struct proc_struct *proc)
 {
     if (proc != current)
@@ -209,23 +209,23 @@ void proc_run(struct proc_struct *proc)
     }
 }
 
-// forkret -- the first kernel entry point of a new thread/process
-// NOTE: the addr of forkret is setted in copy_thread function
-//       after switch_to, the current proc will execute here.
+// forkret -- the first kernel entry point of a new thread/process //第一个新线程/进程的内核入口点
+// NOTE: the addr of forkret is setted in copy_thread function 
+//       after switch_to, the current proc will execute here.forkret //的地址在 copy_thread 函数中设置，切换后，当前进程将在此处执行。
 static void
 forkret(void)
 {
     forkrets(current->tf);
 }
 
-// hash_proc - add proc into proc hash_list
+// hash_proc - add proc into proc hash_list //根据 pid 将 proc 添加到 proc hash_list 中
 static void
 hash_proc(struct proc_struct *proc)
 {
     list_add(hash_list + pid_hashfn(proc->pid), &(proc->hash_link));
 }
 
-// find_proc - find proc frome proc hash_list according to pid
+// find_proc - find proc frome proc hash_list according to pid //根据 pid 从 proc hash_list 中查找 proc
 struct proc_struct *
 find_proc(int pid)
 {
@@ -244,9 +244,9 @@ find_proc(int pid)
     return NULL;
 }
 
-// kernel_thread - create a kernel thread using "fn" function
+// kernel_thread - create a kernel thread using "fn" function //创建一个使用 "fn" 函数的内核线程
 // NOTE: the contents of temp trapframe tf will be copied to
-//       proc->tf in do_fork-->copy_thread function
+//       proc->tf in do_fork-->copy_thread function //临时陷阱帧 tf 的内容将被复制到 do_fork-->copy_thread 函数中的 proc->tf 中
 int kernel_thread(int (*fn)(void *), void *arg, uint32_t clone_flags)
 {
     struct trapframe tf;
@@ -258,7 +258,7 @@ int kernel_thread(int (*fn)(void *), void *arg, uint32_t clone_flags)
     return do_fork(clone_flags | CLONE_VM, 0, &tf);
 }
 
-// setup_kstack - alloc pages with size KSTACKPAGE as process kernel stack
+// setup_kstack - alloc pages with size KSTACKPAGE as process kernel stack //为进程内核栈分配大小为 KSTACKPAGE 的页面
 static int
 setup_kstack(struct proc_struct *proc)
 {
@@ -271,7 +271,7 @@ setup_kstack(struct proc_struct *proc)
     return -E_NO_MEM;
 }
 
-// put_kstack - free the memory space of process kernel stack
+// put_kstack - free the memory space of process kernel stack //释放进程内核栈的内存空间
 static void
 put_kstack(struct proc_struct *proc)
 {
@@ -279,7 +279,9 @@ put_kstack(struct proc_struct *proc)
 }
 
 // copy_mm - process "proc" duplicate OR share process "current"'s mm according clone_flags
-//         - if clone_flags & CLONE_VM, then "share" ; else "duplicate"
+//         - if clone_flags & CLONE_VM, then "share" ; else "duplicate" 
+//         - 根据 clone_flags 复制或共享进程 "current" 的 mm
+//         - 如果 clone_flags & CLONE_VM，则“共享”；否则“复制”
 static int
 copy_mm(uint32_t clone_flags, struct proc_struct *proc)
 {
@@ -290,6 +292,8 @@ copy_mm(uint32_t clone_flags, struct proc_struct *proc)
 
 // copy_thread - setup the trapframe on the  process's kernel stack top and
 //             - setup the kernel entry point and stack of process
+//         - 在进程的内核堆栈顶部设置陷阱帧
+//         - 设置进程的内核入口点和堆栈
 static void
 copy_thread(struct proc_struct *proc, uintptr_t esp, struct trapframe *tf)
 {
@@ -304,10 +308,10 @@ copy_thread(struct proc_struct *proc, uintptr_t esp, struct trapframe *tf)
     proc->context.sp = (uintptr_t)(proc->tf);
 }
 
-/* do_fork -     parent process for a new child process
- * @clone_flags: used to guide how to clone the child process
- * @stack:       the parent's user stack pointer. if stack==0, It means to fork a kernel thread.
- * @tf:          the trapframe info, which will be copied to child process's proc->tf
+/* do_fork -     parent process for a new child process //创建一个新的子进程的父进程
+ * @clone_flags: used to guide how to clone the child process -- see PROC_CLONE_XXX defines //用于指导如何克隆子进程 参阅 PROC_CLONE_XXX 定义
+ * @stack:       the parent's user stack pointer. if stack==0, It means to fork a kernel thread. //父进程的用户堆栈指针。如果 stack==0，则表示要分叉一个内核线程。
+ * @tf:          the trapframe info, which will be copied to child process's proc->tf //陷阱帧信息，将被复制到子进程的 proc->tf 中
  */
 int do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf)
 {
@@ -322,42 +326,42 @@ int do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf)
     /*
      * Some Useful MACROs, Functions and DEFINEs, you can use them in below implementation.
      * MACROs or Functions:
-     *   alloc_proc:   create a proc struct and init fields (lab4:exercise1)
-     *   setup_kstack: alloc pages with size KSTACKPAGE as process kernel stack
-     *   copy_mm:      process "proc" duplicate OR share process "current"'s mm according clone_flags
+     *   alloc_proc:   create a proc struct and init fields (lab4:exercise1) 
+     *   setup_kstack: alloc pages with size KSTACKPAGE as process kernel stack 
+     *   copy_mm:      process "proc" duplicate OR share process "current"'s mm according clone_flags 
      *                 if clone_flags & CLONE_VM, then "share" ; else "duplicate"
      *   copy_thread:  setup the trapframe on the  process's kernel stack top and
      *                 setup the kernel entry point and stack of process
      *   hash_proc:    add proc into proc hash_list
-     *   get_pid:      alloc a unique pid for process
-     *   wakeup_proc:  set proc->state = PROC_RUNNABLE
+     *   get_pid:      alloc a unique pid for process 
+     *   wakeup_proc:  set proc->state = PROC_RUNNABLE 
      * VARIABLES:
-     *   proc_list:    the process set's list
-     *   nr_process:   the number of process set
+     *   proc_list:    the process set's list 
+     *   nr_process:   the number of process set 
      */
 
-    //    1. call alloc_proc to allocate a proc_struct
+    //    1. call alloc_proc to allocate a proc_struct // 分配一个 proc_struct
     if ((proc = alloc_proc()) == NULL) {
     	goto fork_out;
     }
-    //    2. call setup_kstack to allocate a kernel stack for child process
+    //    2. call setup_kstack to allocate a kernel stack for child process // 为子进程分配内核堆栈
     if (setup_kstack(proc) != 0) {
     	goto bad_fork_cleanup_proc;
     }
-    //    3. call copy_mm to dup OR share mm according clone_flag
+    //    3. call copy_mm to dup OR share mm according clone_flag // 根据 clone_flag 复制或共享 mm
     if (copy_mm(clone_flags, proc) != 0) {
     	goto bad_fork_cleanup_kstack;
     }
-    //    4. call copy_thread to setup tf & context in proc_struct
+    //    4. call copy_thread to setup tf & context in proc_struct // 在 proc_struct 中设置 tf 和上下文
     copy_thread(proc, stack, tf);
-    //    5. insert proc_struct into hash_list && proc_list
+    //    5. insert proc_struct into hash_list && proc_list && assign pid // 将 proc_struct 插入 hash_list 和 proc_list 并分配 pid
     proc->pid = get_pid();
     hash_proc(proc);
     list_add(&proc_list, &(proc->list_link));
     nr_process++;
-    //    6. call wakeup_proc to make the new child process RUNNABLE
+    //    6. call wakeup_proc to make the new child process RUNNABLE // 使新的子进程可运行
     wakeup_proc(proc);
-    //    7. set ret vaule using child proc's pid
+    //    7. set ret vaule using child proc's pid // 使用子进程的 pid 设置返回值
     ret = proc->pid;
     
 fork_out:
@@ -371,15 +375,15 @@ bad_fork_cleanup_proc:
 }
 
 // do_exit - called by sys_exit
-//   1. call exit_mmap & put_pgdir & mm_destroy to free the almost all memory space of process
-//   2. set process' state as PROC_ZOMBIE, then call wakeup_proc(parent) to ask parent reclaim itself.
-//   3. call scheduler to switch to other process
+//   1. call exit_mmap & put_pgdir & mm_destroy to free the almost all memory space of process // 释放进程的几乎所有内存空间
+//   2. set process' state as PROC_ZOMBIE, then call wakeup_proc(parent) to ask parent reclaim itself. // 设置进程状态为 PROC_ZOMBIE，然后调用 wakeup_proc(parent) 以请求父进程回收自身。
+//   3. call scheduler to switch to other process // 调用调度程序切换到其他进程
 int do_exit(int error_code)
 {
     panic("process exit!!.\n");
 }
 
-// init_main - the second kernel thread used to create user_main kernel threads
+// init_main - the second kernel thread used to create user_main kernel threads // 第二个内核线程用于创建 user_main 内核线程
 static int
 init_main(void *arg)
 {
@@ -390,7 +394,7 @@ init_main(void *arg)
 }
 
 // proc_init - set up the first kernel thread idleproc "idle" by itself and
-//           - create the second kernel thread init_main
+//           - create the second kernel thread init_main // 通过自身设置第一个内核线程 idleproc "idle" 并创建第二个内核线程 init_main
 void proc_init(void)
 {
     int i;
@@ -442,7 +446,7 @@ void proc_init(void)
     assert(initproc != NULL && initproc->pid == 1);
 }
 
-// cpu_idle - at the end of kern_init, the first kernel thread idleproc will do below works
+// cpu_idle - at the end of kern_init, the first kernel thread idleproc will do below works // 在 kern_init 的末尾，第一个内核线程 idleproc 将执行以下工作
 void cpu_idle(void)
 {
     while (1)
