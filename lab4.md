@@ -78,6 +78,153 @@ struct trapframe *tf 是指向陷阱帧的指针，陷阱帧存储进程发生�
 本实验中 tf 初始化为 NULL，表示进程尚未发生中断 / 异常，后续会在线程创建过程中动态分配并初始化。
 四、实验总结
 
+## 练习2：为新创建的内核线程分配资源（需要编码）
+
+### 实验要求
+创建一个内核线程需要分配和设置好很多资源。kernel_thread函数通过调用do_fork函数完成具体内核线程的创建工作。do_fork函数会调用alloc_proc函数来分配并初始化一个进程控制块，但alloc_proc只是找到了一小块内存用以记录进程的必要信息，并没有实际分配这些资源。ucore一般通过do_fork实际创建新的内核线程。do_fork的作用是，创建当前内核线程的一个副本，它们的执行上下文、代码、数据都一样，但是存储位置不同。因此，我们实际需要"fork"的东西就是stack和trapframe。在这个过程中，需要给新内核线程分配资源，并且复制原进程的状态。你需要完成在kern/process/proc.c中的do_fork函数中的处理过程。它的大致执行步骤包括：
+
+- 调用alloc_proc，首先获得一块用户信息块。
+- 为进程分配一个内核栈。
+- 复制原进程的内存管理信息到新进程（但内核线程不必做此事）
+- 复制原进程上下文到新进程
+- 将新进程添加到进程列表
+- 唤醒新进程
+- 返回新进程号
+
+请在实验报告中简要说明你的设计实现过程。请回答如下问题：
+
+请说明ucore是否做到给每个新fork的线程一个唯一的id？请说明你的分析和理由。
+
+### 设计实现过程
+
+根据实验要求，do_fork函数需要完成新内核线程的资源分配和初始化工作。我按照以下步骤实现了该函数：
+
+#### 1. 分配进程控制块
+首先调用alloc_proc()分配进程控制块，如果分配失败则直接返回错误。
+
+#### 2. 分配内核栈
+调用setup_kstack()为子进程分配内核栈空间，如果分配失败需要进行资源清理。
+
+#### 3. 复制内存管理信息
+调用copy_mm()根据clone_flags参数决定是共享还是复制父进程的内存空间。对于内核线程，由于共享内核空间，此步骤相对简单。
+
+#### 4. 复制线程上下文
+调用copy_thread()设置子进程的陷阱帧和执行上下文，确保子进程能够正确开始执行。
+
+#### 5. 分配PID并加入进程列表
+在中断保护下：
+- 调用get_pid()分配唯一进程ID
+- 将进程加入哈希表和进程列表
+- 更新进程计数
+
+#### 6. 唤醒新进程
+调用wakeup_proc()将进程状态设置为PROC_RUNNABLE，使其可被调度执行。
+
+#### 7. 返回进程ID
+将新创建进程的PID作为函数返回值。
+
+### 代码实现
+
+```c
+int do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf)
+{
+    int ret = -E_NO_FREE_PROC;
+    struct proc_struct *proc;
+    if (nr_process >= MAX_PROCESS)
+    {
+        goto fork_out;
+    }
+    ret = -E_NO_MEM;
+    
+    // 1. 调用alloc_proc分配进程控制块
+    if ((proc = alloc_proc()) == NULL) {
+        goto fork_out;
+    }
+    
+    // 2. 调用setup_kstack分配内核栈
+    if (setup_kstack(proc) != 0) {
+        goto bad_fork_cleanup_proc;
+    }
+    
+    // 3. 调用copy_mm复制内存管理信息
+    if (copy_mm(clone_flags, proc) != 0) {
+        goto bad_fork_cleanup_kstack;
+    }
+    
+    // 4. 调用copy_thread设置陷阱帧和上下文
+    copy_thread(proc, stack, tf);
+    
+    // 5. 分配PID并加入进程列表（在中断保护下）
+    bool intr_flag;
+    local_intr_save(intr_flag);
+    {
+        proc->pid = get_pid();
+        hash_proc(proc);
+        list_add(&proc_list, &(proc->list_link));
+        nr_process++;
+    }
+    local_intr_restore(intr_flag);
+    
+    // 6. 唤醒新进程
+    wakeup_proc(proc);
+    
+    // 7. 返回进程ID
+    ret = proc->pid;
+
+fork_out:
+    return ret;
+
+bad_fork_cleanup_kstack:
+    put_kstack(proc);
+bad_fork_cleanup_proc:
+    kfree(proc);
+    goto fork_out;
+}
+```
+
+### 错误处理机制
+实现中包含了完善的错误处理：
+- 如果内核栈分配失败，跳转到bad_fork_cleanup_proc清理进程控制块
+- 如果内存管理信息复制失败，跳转到bad_fork_cleanup_kstack清理内核栈
+- 所有资源分配都遵循"申请失败即清理"的原则
+
+### 解答：ucore是否做到给每个新fork的线程一个唯一的id？
+
+**是的，ucore能够给每个新fork的线程一个唯一的id。**
+
+#### 分析和理由：
+
+##### 1. PID分配算法设计
+在get_pid()函数中，ucore实现了以下保证唯一性的机制：
+- 使用静态变量last_pid和next_safe管理PID分配
+- 初始时last_pid从1开始，next_safe为MAX_PID
+- 采用"查找-分配"策略，确保分配的PID不重复
+
+##### 2. 冲突检测与解决
+当发现PID冲突时，系统会：
+- 递增last_pid继续查找可用PID
+- 如果超过MAX_PID则回绕到1重新开始
+- 同时维护next_safe记录下一个可能冲突的PID，优化查找效率
+
+##### 3. 并发安全保护
+在do_fork()中，PID分配和进程添加到列表的操作是在中断禁用的情况下进行的，这防止了多核并发或中断上下文导致的PID冲突。
+
+##### 4. 系统范围保证
+通过静态断言确保PID范围足够：
+```c
+static_assert(MAX_PID > MAX_PROCESS);
+```
+保证系统有足够的PID空间容纳所有可能的进程。
+
+##### 5. 算法正确性验证
+get_pid()算法能够：
+- 遍历现有进程PID确保不重复
+- 在PID空间紧张时正确回绕
+- 高效跳过已被占用的PID范围，避免线性搜索的性能问题
+
+### 结论
+ucore通过精心设计的PID分配算法、完善的冲突解决机制和严格的并发保护，能够确保每个新创建的进程/线程都获得一个唯一的进程ID。这种设计既保证了系统的正确性，又提供了良好的性能表现。
+
 ## 练习3：编写proc_run 函数（需要编码）
 ### 实验要求
 proc_run用于将指定的进程切换到CPU上运行。它的大致执行步骤包括：
@@ -166,4 +313,5 @@ static inline void __intr_restore(bool flag) {
 ```
 - intr_flag：用于保存当前中断状态。1表示中断已启用，0表示中断已禁用。
 - local_intr_save(intr_flag)：调用__intr_save()函数，检查中断状态寄存器 sstatus 的 SIE 位。如果 SIE 位被设置，表示中断已启用，则调用 intr_disable 函数禁用中断，并返回1。否则，返回0。
+
 - local_intr_restore(intr_flag)：调用__intr_restore(intr_flag)函数，根据传入的标志变量 intr_flag 的值决定是否重新启用中断。如果intr_flag为1，则调用intr_enable()函数重新启用中断；如果intr_flag为0，则不进行任何操作，保持中断禁用状态。
