@@ -10,6 +10,7 @@ wakeup_proc(struct proc_struct *proc) {
     proc->state = PROC_RUNNABLE;
 }
 
+//注释 : 调度函数，从进程链表中选择下一个可运行的进程并切换到该进程
 void
 schedule(void) {
     bool intr_flag;

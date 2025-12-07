@@ -410,7 +410,7 @@ void proc_init(void)
         panic("cannot alloc idleproc.\n");
     }
 
-    // check the proc structure
+    // check the proc structure //
     int *context_mem = (int *)kmalloc(sizeof(struct context));
     memset(context_mem, 0, sizeof(struct context));
     int context_init_flag = memcmp(&(idleproc->context), context_mem, sizeof(struct context));

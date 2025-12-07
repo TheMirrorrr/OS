@@ -1,4 +1,4 @@
-V#include <default_pmm.h>
+#include <default_pmm.h>
 #include <defs.h>
 #include <error.h>
 #include <kmalloc.h>
@@ -6,12 +6,12 @@ V#include <default_pmm.h>
 #include <mmu.h>
 #include <pmm.h>
 #include <sbi.h>
+#include <dtb.h>
 #include <stdio.h>
 #include <string.h>
 #include <sync.h>
 #include <vmm.h>
 #include <riscv.h>
-#include <dtb.h>
 
 // virtual address of physical page array
 struct Page *pages;
@@ -95,11 +95,12 @@ static void page_init(void)
     va_pa_offset = PHYSICAL_MEMORY_OFFSET;
 
     uint64_t mem_begin = get_memory_base();
-    uint64_t mem_size  = get_memory_size();
-    if (mem_size == 0) {
+    uint64_t mem_size = get_memory_size();
+    if (mem_size == 0)
+    {
         panic("DTB memory info not available");
     }
-    uint64_t mem_end   = mem_begin + mem_size;
+    uint64_t mem_end = mem_begin + mem_size;
 
     cprintf("physcial memory map:\n");
     cprintf("  memory: 0x%08lx, [0x%08lx, 0x%08lx].\n", mem_size, mem_begin,
@@ -134,10 +135,6 @@ static void page_init(void)
         init_memmap(pa2page(mem_begin), (mem_end - mem_begin) / PGSIZE);
     }
     cprintf("vapaofset is %llu\n", va_pa_offset);
-}
-static void enable_paging(void)
-{
-    write_csr(satp, 0x8000000000000000 | (boot_pgdir_pa >> RISCV_PGSHIFT));
 }
 
 // boot_map_segment - setup&enable the paging mechanism
@@ -197,6 +194,7 @@ void pmm_init(void)
     // use pmm->check to verify the correctness of the alloc/free function in a
     // pmm
     check_alloc_page();
+
     // create boot_pgdir, an initial page directory(Page Directory Table, PDT)
     extern char boot_page_table_sv39[];
     boot_pgdir_va = (pte_t *)boot_page_table_sv39;
@@ -213,7 +211,7 @@ void pmm_init(void)
     kmalloc_init();
 }
 
-// get_pte - get pte and return the kernel virtual address of this pte for la 
+// get_pte - get pte and return the kernel virtual address of this pte for la
 //        - if the PT contians this pte didn't exist, alloc a page for PT
 // parameter:
 //  pgdir:  the kernel virtual base address of PDT
@@ -235,7 +233,8 @@ pte_t *get_pte(pde_t *pgdir, uintptr_t la, bool create)
         memset(KADDR(pa), 0, PGSIZE);
         *pdep1 = pte_create(page2ppn(page), PTE_U | PTE_V);
     }
-    pde_t *pdep0 = &((pte_t *)KADDR(PDE_ADDR(*pdep1)))[PDX0(la)];
+
+    pde_t *pdep0 = &((pde_t *)KADDR(PDE_ADDR(*pdep1)))[PDX0(la)];
     if (!(*pdep0 & PTE_V))
     {
         struct Page *page;
@@ -272,18 +271,163 @@ struct Page *get_page(pde_t *pgdir, uintptr_t la, pte_t **ptep_store)
 static inline void page_remove_pte(pde_t *pgdir, uintptr_t la, pte_t *ptep)
 {
     if (*ptep & PTE_V)
-    { //(1) check if this page table entry is
-        struct Page *page =
-            pte2page(*ptep); //(2) find corresponding page to pte
-        page_ref_dec(page);  //(3) decrease page reference
-        if (page_ref(page) ==
-            0)
-        { //(4) and free this page when page reference reachs 0
+    {
+        struct Page *page = pte2page(*ptep);
+        page_ref_dec(page);
+        if (page_ref(page) == 0)
+        {
             free_page(page);
         }
-        *ptep = 0;                 //(5) clear second page table entry
-        tlb_invalidate(pgdir, la); //(6) flush tlb
+        *ptep = 0;
+        tlb_invalidate(pgdir, la);
     }
+}
+
+void unmap_range(pde_t *pgdir, uintptr_t start, uintptr_t end)
+{
+    assert(start % PGSIZE == 0 && end % PGSIZE == 0);
+    assert(USER_ACCESS(start, end));
+
+    do
+    {
+        pte_t *ptep = get_pte(pgdir, start, 0);
+        if (ptep == NULL)
+        {
+            start = ROUNDDOWN(start + PTSIZE, PTSIZE);
+            continue;
+        }
+        if (*ptep != 0)
+        {
+            page_remove_pte(pgdir, start, ptep);
+        }
+        start += PGSIZE;
+    } while (start != 0 && start < end);
+}
+
+void exit_range(pde_t *pgdir, uintptr_t start, uintptr_t end)
+{
+    assert(start % PGSIZE == 0 && end % PGSIZE == 0);
+    assert(USER_ACCESS(start, end));
+
+    uintptr_t d1start, d0start;
+    int free_pt, free_pd0;
+    pde_t *pd0, *pt, pde1, pde0;
+    d1start = ROUNDDOWN(start, PDSIZE);
+    d0start = ROUNDDOWN(start, PTSIZE);
+    do
+    {
+        // level 1 page directory entry
+        pde1 = pgdir[PDX1(d1start)];
+        // if there is a valid entry, get into level 0
+        // and try to free all page tables pointed to by
+        // all valid entries in level 0 page directory,
+        // then try to free this level 0 page directory
+        // and update level 1 entry
+        if (pde1 & PTE_V)
+        {
+            pd0 = page2kva(pde2page(pde1));
+            // try to free all page tables
+            free_pd0 = 1;
+            do
+            {
+                pde0 = pd0[PDX0(d0start)];
+                if (pde0 & PTE_V)
+                {
+                    pt = page2kva(pde2page(pde0));
+                    // try to free page table
+                    free_pt = 1;
+                    for (int i = 0; i < NPTEENTRY; i++)
+                        if (pt[i] & PTE_V)
+                        {
+                            free_pt = 0;
+                            break;
+                        }
+                    // free it only when all entry are already invalid
+                    if (free_pt)
+                    {
+                        free_page(pde2page(pde0));
+                        pd0[PDX0(d0start)] = 0;
+                    }
+                }
+                else
+                    free_pd0 = 0;
+                d0start += PTSIZE;
+            } while (d0start != 0 && d0start < d1start + PDSIZE && d0start < end);
+            // free level 0 page directory only when all pde0s in it are already invalid
+            if (free_pd0)
+            {
+                free_page(pde2page(pde1));
+                pgdir[PDX1(d1start)] = 0;
+            }
+        }
+        d1start += PDSIZE;
+        d0start = d1start;
+    } while (d1start != 0 && d1start < end);
+}
+/* copy_range - copy content of memory (start, end) of one process A to another
+ * process B
+ * @to:    the addr of process B's Page Directory
+ * @from:  the addr of process A's Page Directory
+ * @share: flags to indicate to dup OR share. We just use dup method, so it
+ * didn't be used.
+ *
+ * CALL GRAPH: copy_mm-->dup_mmap-->copy_range
+ */
+int copy_range(pde_t *to, pde_t *from, uintptr_t start, uintptr_t end,
+               bool share)
+{
+    assert(start % PGSIZE == 0 && end % PGSIZE == 0);
+    assert(USER_ACCESS(start, end));
+    // copy content by page unit.
+    do
+    {
+        // call get_pte to find process A's pte according to the addr start
+        pte_t *ptep = get_pte(from, start, 0), *nptep;
+        if (ptep == NULL)
+        {
+            start = ROUNDDOWN(start + PTSIZE, PTSIZE);
+            continue;
+        }
+        // call get_pte to find process B's pte according to the addr start. If
+        // pte is NULL, just alloc a PT
+        if (*ptep & PTE_V)
+        {
+            if ((nptep = get_pte(to, start, 1)) == NULL)
+            {
+                return -E_NO_MEM;
+            }
+            uint32_t perm = (*ptep & PTE_USER);
+            // get page from ptep
+            struct Page *page = pte2page(*ptep);
+            // alloc a page for process B
+            struct Page *npage = alloc_page();
+            assert(page != NULL);
+            assert(npage != NULL);
+            int ret = 0;
+            /* LAB5:EXERCISE2 YOUR CODE
+             * replicate content of page to npage, build the map of phy addr of
+             * nage with the linear addr start
+             *
+             * Some Useful MACROs and DEFINEs, you can use them in below
+             * implementation.
+             * MACROs or Functions:
+             *    page2kva(struct Page *page): return the kernel vritual addr of
+             * memory which page managed (SEE pmm.h)
+             *    page_insert: build the map of phy addr of an Page with the
+             * linear addr la
+             *    memcpy: typical memory copy function
+             *
+             * (1) find src_kvaddr: the kernel virtual address of page
+             * (2) find dst_kvaddr: the kernel virtual address of npage
+             * (3) memory copy from src_kvaddr to dst_kvaddr, size is PGSIZE
+             * (4) build the map of phy addr of  nage with the linear addr start
+             */
+
+            assert(ret == 0);
+        }
+        start += PGSIZE;
+    } while (start != 0 && start < end);
+    return 0;
 }
 
 // page_remove - free an Page which is related linear address la and has an
@@ -330,13 +474,36 @@ int page_insert(pde_t *pgdir, struct Page *page, uintptr_t la, uint32_t perm)
     return 0;
 }
 
-// invalidate a TLB entry, but only if the page tables being 
+// invalidate a TLB entry, but only if the page tables being
 // edited are the ones currently in use by the processor.
 void tlb_invalidate(pde_t *pgdir, uintptr_t la)
 {
-    // flush_tlb();
-    // The flush_tlb flush the entire TLB, is there any better way?
     asm volatile("sfence.vma %0" : : "r"(la));
+}
+
+// pgdir_alloc_page - call alloc_page & page_insert functions to
+//                  - allocate a page size memory & setup an addr map
+//                  - pa<->la with linear address la and the PDT pgdir
+struct Page *pgdir_alloc_page(pde_t *pgdir, uintptr_t la, uint32_t perm)
+{
+    struct Page *page = alloc_page();
+    if (page != NULL)
+    {
+        if (page_insert(pgdir, page, la, perm) != 0)
+        {
+            free_page(page);
+            return NULL;
+        }
+        // swap_map_swappable(check_mm_struct, la, page, 0);
+        page->pra_vaddr = la;
+        assert(page_ref(page) == 1);
+        // cprintf("get No. %d  page: pra_vaddr %x, pra_link.prev %x,
+        // pra_link_next %x in pgdir_alloc_page\n", (page-pages),
+        // page->pra_vaddr,page->pra_page_link.prev,
+        // page->pra_page_link.next);
+    }
+
+    return page;
 }
 
 static void check_alloc_page(void)
