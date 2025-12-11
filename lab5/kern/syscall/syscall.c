@@ -78,12 +78,13 @@ static int (*syscalls[])(uint64_t arg[]) = {
 
 #define NUM_SYSCALLS        ((sizeof(syscalls)) / (sizeof(syscalls[0])))
 
+// 系统调用处理函数，由陷入处理程序调用，根据系统调用号找到对应的系统调用处理函数并调用
 void
 syscall(void) {
     struct trapframe *tf = current->tf;
     uint64_t arg[5];
-    int num = tf->gpr.a0;
-    if (num >= 0 && num < NUM_SYSCALLS) {
+    int num = tf->gpr.a0;//a0寄存器保存了系统调用编号
+    if (num >= 0 && num < NUM_SYSCALLS) {//防止syscalls[num]下标越界
         if (syscalls[num] != NULL) {
             arg[0] = tf->gpr.a1;
             arg[1] = tf->gpr.a2;
@@ -91,6 +92,7 @@ syscall(void) {
             arg[3] = tf->gpr.a4;
             arg[4] = tf->gpr.a5;
             tf->gpr.a0 = syscalls[num](arg);
+            //把寄存器里的参数取出来，转发给系统调用编号对应的函数进行处理
             return ;
         }
     }

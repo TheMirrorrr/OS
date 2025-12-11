@@ -41,8 +41,8 @@
 #define SSTATUS_UIE         0x00000001
 #define SSTATUS_SIE         0x00000002
 #define SSTATUS_UPIE        0x00000010
-#define SSTATUS_SPIE        0x00000020
-#define SSTATUS_SPP         0x00000100
+#define SSTATUS_SPIE        0x00000020 // 表示中断使能位的前一个值
+#define SSTATUS_SPP         0x00000100 // 表示陷阱发生时的特权级别，0表示用户模式，1表示超级模式
 #define SSTATUS_FS          0x00006000
 #define SSTATUS_XS          0x00018000
 #define SSTATUS_PUM         0x00040000
@@ -152,15 +152,15 @@
 #define DRAM_BASE          0x80000000
 
 // page table entry (PTE) fields
-#define PTE_V     0x001 // Valid
-#define PTE_R     0x002 // Read
-#define PTE_W     0x004 // Write
-#define PTE_X     0x008 // Execute
-#define PTE_U     0x010 // User
-#define PTE_G     0x020 // Global
-#define PTE_A     0x040 // Accessed
-#define PTE_D     0x080 // Dirty
-#define PTE_SOFT  0x300 // Reserved for Software
+#define PTE_V     0x001 // Valid 有效
+#define PTE_R     0x002 // Read 读
+#define PTE_W     0x004 // Write 写
+#define PTE_X     0x008 // Execute 执行
+#define PTE_U     0x010 // User 用户
+#define PTE_G     0x020 // Global 全局
+#define PTE_A     0x040 // Accessed 已访问
+#define PTE_D     0x080 // Dirty 已修改
+#define PTE_SOFT  0x300 // Reserved for Software 保留给软件使用
 
 #define PTE_PPN_SHIFT 10
 

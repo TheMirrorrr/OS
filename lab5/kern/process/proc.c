@@ -89,7 +89,7 @@ alloc_proc(void)
     struct proc_struct *proc = kmalloc(sizeof(struct proc_struct));
     if (proc != NULL)
     {
-        // LAB4:EXERCISE1 YOUR CODE
+        // LAB4:EXERCISE1 2310511
         /*
          * below fields in proc_struct need to be initialized
          *       enum proc_state state;                      // Process state
@@ -118,12 +118,16 @@ alloc_proc(void)
         proc->flags = 0;
         memset(&(proc->context), 0, sizeof(struct context));
         memset(proc->name, 0, PROC_NAME_LEN + 1);
-        // LAB5 YOUR CODE : (update LAB4 steps)
+        // LAB5 2312823 : (update LAB4 steps)
         /*
          * below fields(add in LAB5) in proc_struct need to be initialized
          *       uint32_t wait_state;                        // waiting state
          *       struct proc_struct *cptr, *yptr, *optr;     // relations between processes
          */
+        proc->wait_state = 0;
+        proc->cptr = NULL;
+        proc->yptr = NULL;
+        proc->optr = NULL;
     }
     return proc;
 }
@@ -462,6 +466,7 @@ int do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf)
     if ((proc = alloc_proc()) == NULL) {
     	goto fork_out;
     }
+    proc->parent = current;
     //    2. call setup_kstack to allocate a kernel stack for child process // 为子进程分配内核堆栈
     if (setup_kstack(proc) != 0) {
     	goto bad_fork_cleanup_proc;
@@ -475,20 +480,23 @@ int do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf)
     //    5. insert proc_struct into hash_list && proc_list && assign pid // 将 proc_struct 插入 hash_list 和 proc_list 并分配 pid
     proc->pid = get_pid();
     hash_proc(proc);
-    list_add(&proc_list, &(proc->list_link));
-    nr_process++;
+    set_links(proc);
+    //list_add(&proc_list, &(proc->list_link));
+    //nr_process++;
     //    6. call wakeup_proc to make the new child process RUNNABLE // 使新的子进程可运行
     wakeup_proc(proc);
     //    7. set ret vaule using child proc's pid // 使用子进程的 pid 设置返回值
     ret = proc->pid;
 
-    // LAB5 YOUR CODE : (update LAB4 steps)
+    // LAB5 2312823 : (update LAB4 steps)
     // TIPS: you should modify your written code in lab4(step1 and step5), not add more code.
     /* Some Functions
      *    set_links:  set the relation links of process.  ALSO SEE: remove_links:  lean the relation links of process
      *    -------------------
-     *    update step 1: set child proc's parent to current process, make sure current process's wait_state is 0
+     *    update step 1: set child proc's parent to current process, make sure current process's wait_state is 0 
+     *                   设置子进程的父进程为当前进程，确保当前进程的等待状态为0
      *    update step 5: insert proc_struct into hash_list && proc_list, set the relation links of process
+     *                   将 proc_struct 插入 hash_list 和 proc_list，设置进程的关系链接
      */
 
 fork_out:
@@ -578,23 +586,23 @@ load_icode(unsigned char *binary, size_t size)
 
     int ret = -E_NO_MEM;
     struct mm_struct *mm;
-    //(1) create a new mm for current process
+    //(1) create a new mm for current process 为当前进程创建一个新的 mm
     if ((mm = mm_create()) == NULL)
     {
         goto bad_mm;
     }
-    //(2) create a new PDT, and mm->pgdir= kernel virtual addr of PDT
+    //(2) create a new PDT, and mm->pgdir= kernel virtual addr of PDT 为当前进程创建一个新的 PDT，并将 mm->pgdir 设置为 PDT 的内核虚拟地址
     if (setup_pgdir(mm) != 0)
     {
         goto bad_pgdir_cleanup_mm;
     }
-    //(3) copy TEXT/DATA section, build BSS parts in binary to memory space of process
+    //(3) copy TEXT/DATA section, build BSS parts in binary to memory space of process 复制文本/数据部分，在进程的内存空间中构建 BSS 部分
     struct Page *page;
-    //(3.1) get the file header of the bianry program (ELF format)
+    //(3.1) get the file header of the bianry program (ELF format) 获取二进制程序的文件头（ELF 格式）
     struct elfhdr *elf = (struct elfhdr *)binary;
-    //(3.2) get the entry of the program section headers of the bianry program (ELF format)
+    //(3.2) get the entry of the program section headers of the bianry program (ELF format) 获取二进制程序的程序节头的条目（ELF 格式）
     struct proghdr *ph = (struct proghdr *)(binary + elf->e_phoff);
-    //(3.3) This program is valid?
+    //(3.3) This program is valid? 检查该程序是否有效
     if (elf->e_magic != ELF_MAGIC)
     {
         ret = -E_INVAL_ELF;
@@ -605,7 +613,7 @@ load_icode(unsigned char *binary, size_t size)
     struct proghdr *ph_end = ph + elf->e_phnum;
     for (; ph < ph_end; ph++)
     {
-        //(3.4) find every program section headers
+        //(3.4) find every program section headers ELF_PT_LOAD 遍历每个类型为 ELF_PT_LOAD 的程序节头
         if (ph->p_type != ELF_PT_LOAD)
         {
             continue;
@@ -619,7 +627,7 @@ load_icode(unsigned char *binary, size_t size)
         {
             // continue ;
         }
-        //(3.5) call mm_map fun to setup the new vma ( ph->p_va, ph->p_memsz)
+        //(3.5) call mm_map fun to setup the new vma ( ph->p_va, ph->p_memsz) 调用 mm_map 函数来设置新的 vma ( ph->p_va, ph->p_memsz)
         vm_flags = 0, perm = PTE_U | PTE_V;
         if (ph->p_flags & ELF_PF_X)
             vm_flags |= VM_EXEC;
@@ -627,7 +635,7 @@ load_icode(unsigned char *binary, size_t size)
             vm_flags |= VM_WRITE;
         if (ph->p_flags & ELF_PF_R)
             vm_flags |= VM_READ;
-        // modify the perm bits here for RISC-V
+        // modify the perm bits here for RISC-V 确定 RISC-V 的权限位
         if (vm_flags & VM_READ)
             perm |= PTE_R;
         if (vm_flags & VM_WRITE)
@@ -645,8 +653,10 @@ load_icode(unsigned char *binary, size_t size)
         ret = -E_NO_MEM;
 
         //(3.6) alloc memory, and  copy the contents of every program section (from, from+end) to process's memory (la, la+end)
+        // 分配内存，并将每个程序节的内容（from，from+end）复制到进程的内存（la，la+end）
         end = ph->p_va + ph->p_filesz;
         //(3.6.1) copy TEXT/DATA section of bianry program
+        //复制二进制程序的文本/数据部分
         while (start < end)
         {
             if ((page = pgdir_alloc_page(mm->pgdir, la, perm)) == NULL)
@@ -662,7 +672,7 @@ load_icode(unsigned char *binary, size_t size)
             start += size, from += size;
         }
 
-        //(3.6.2) build BSS section of binary program
+        //(3.6.2) build BSS section of binary program 构建二进制程序的 BSS 部分
         end = ph->p_va + ph->p_memsz;
         if (start < la)
         {
@@ -695,7 +705,7 @@ load_icode(unsigned char *binary, size_t size)
             start += size;
         }
     }
-    //(4) build user stack memory
+    //(4) build user stack memory 构建用户堆栈内存空间
     vm_flags = VM_READ | VM_WRITE | VM_STACK;
     if ((ret = mm_map(mm, USTACKTOP - USTACKSIZE, USTACKSIZE, vm_flags, NULL)) != 0)
     {
@@ -706,25 +716,33 @@ load_icode(unsigned char *binary, size_t size)
     assert(pgdir_alloc_page(mm->pgdir, USTACKTOP - 3 * PGSIZE, PTE_USER) != NULL);
     assert(pgdir_alloc_page(mm->pgdir, USTACKTOP - 4 * PGSIZE, PTE_USER) != NULL);
 
-    //(5) set current process's mm, sr3, and set satp reg = physical addr of Page Directory
+    //(5) set current process's mm, sr3, and set satp reg = physical addr of Page Directory 设置当前进程的 mm，sr3，并将 satp 寄存器设置为页目录的物理地址
     mm_count_inc(mm);
     current->mm = mm;
     current->pgdir = PADDR(mm->pgdir);
     lsatp(PADDR(mm->pgdir));
 
-    //(6) setup trapframe for user environment
+    //(6) setup trapframe for user environment 设置用户环境的陷阱帧
     struct trapframe *tf = current->tf;
     // Keep sstatus
     uintptr_t sstatus = tf->status;
     memset(tf, 0, sizeof(struct trapframe));
-    /* LAB5:EXERCISE1 YOUR CODE
+    /* LAB5:EXERCISE1 2312823
      * should set tf->gpr.sp, tf->epc, tf->status
-     * NOTICE: If we set trapframe correctly, then the user level process can return to USER MODE from kernel. So
-     *          tf->gpr.sp should be user stack top (the value of sp)
+     * NOTICE: If we set trapframe correctly, then the user level process can return to USER MODE from kernel. So 
+     *          tf->gpr.sp should be user stack top (the value of sp) 
      *          tf->epc should be entry point of user program (the value of sepc)
      *          tf->status should be appropriate for user program (the value of sstatus)
      *          hint: check meaning of SPP, SPIE in SSTATUS, use them by SSTATUS_SPP, SSTATUS_SPIE(defined in risv.h)
+     * 提示：如果我们正确设置了陷阱帧，那么用户级进程就可以从内核返回到用户模式。因此
+     *          tf->gpr.sp 应该是用户堆栈顶部（sp 的值）
+     *          tf->epc 应该是用户程序的入口点（sepc 的值）
+     *          tf->status 应该适合用户程序（sstatus 的值）
+     *          检查 SSTATUS 中 SPP、SPIE 的含义，使用它们通过 risv.h 中定义的 SSTATUS_SPP、SSTATUS_SPIE）
      */
+    tf->gpr.sp = USTACKTOP;
+    tf->epc = elf->e_entry;
+    tf->status = (sstatus & ~SSTATUS_SPP) | SSTATUS_SPIE;
 
     ret = 0;
 out:
@@ -739,16 +757,16 @@ bad_mm:
     goto out;
 }
 
-// do_execve - call exit_mmap(mm)&put_pgdir(mm) to reclaim memory space of current process
-//           - call load_icode to setup new memory space accroding binary prog.
+// do_execve - call exit_mmap(mm)&put_pgdir(mm) to reclaim memory space of current process 调用 exit_mmap(mm)&put_pgdir(mm) 回收当前进程的内存空间
+//           - call load_icode to setup new memory space accroding binary prog. 调用 load_icode 根据二进制程序设置新的内存空间
 int do_execve(const char *name, size_t len, unsigned char *binary, size_t size)
 {
     struct mm_struct *mm = current->mm;
-    if (!user_mem_check(mm, (uintptr_t)name, len, 0))
+    if (!user_mem_check(mm, (uintptr_t)name, len, 0)) //检查name的内存空间能否被访问
     {
         return -E_INVAL;
     }
-    if (len > PROC_NAME_LEN)
+    if (len > PROC_NAME_LEN) //进程名字的长度有上限 PROC_NAME_LEN，在proc.h定义
     {
         len = PROC_NAME_LEN;
     }
@@ -765,16 +783,19 @@ int do_execve(const char *name, size_t len, unsigned char *binary, size_t size)
         {
             exit_mmap(mm);
             put_pgdir(mm);
-            mm_destroy(mm);
+            mm_destroy(mm);//把进程当前占用的内存释放，之后重新分配内存
         }
         current->mm = NULL;
     }
+    //把新的程序加载到当前进程里的工作都在load_icode()函数里完成
     int ret;
     if ((ret = load_icode(binary, size)) != 0)
     {
         goto execve_exit;
     }
     set_proc_name(current, local_name);
+    //如果set_proc_name的实现不变, 为什么不能直接set_proc_name(current, name)?
+    //name是用户传进来的指针，不能直接在内核中使用
     return 0;
 
 execve_exit:
@@ -926,7 +947,7 @@ kernel_execve(const char *name, unsigned char *binary, size_t size)
 
 #define KERNEL_EXECVE2(x, xstart, xsize) __KERNEL_EXECVE2(x, xstart, xsize)
 
-// user_main - kernel thread used to exec a user program
+// user_main - kernel thread used to exec a user program 内核线程用于执行用户程序
 static int
 user_main(void *arg)
 {

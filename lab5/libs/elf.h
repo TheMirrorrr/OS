@@ -12,7 +12,7 @@ struct elfhdr {
     uint16_t e_type;      // 1=relocatable, 2=executable, 3=shared object, 4=core image
     uint16_t e_machine;   // 3=x86, 4=68K, etc.
     uint32_t e_version;   // file version, always 1
-    uint64_t e_entry;     // entry point if executable
+    uint64_t e_entry;     // entry point if executable 可执行文件的入口点
     uint64_t e_phoff;     // file position of program header or 0
     uint64_t e_shoff;     // file position of section header or 0
     uint32_t e_flags;     // architecture-specific flags, usually 0

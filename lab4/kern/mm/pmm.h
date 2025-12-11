@@ -166,7 +166,7 @@ static inline void flush_tlb()
     asm volatile("sfence.vma");
 }
 
-// construct PTE from a page and permission bits
+// construct PTE from a page and permission bits 从页面和权限位构造 PTE
 static inline pte_t pte_create(uintptr_t ppn, int type)
 {
     return (ppn << PTE_PPN_SHIFT) | PTE_V | type;

@@ -60,7 +60,7 @@
 #define KSTACKPAGE 2                     // # of pages in kernel stack
 #define KSTACKSIZE (KSTACKPAGE * PGSIZE) // sizeof kernel stack
 
-#define USERTOP 0x80000000
+#define USERTOP 0x80000000 // user top virtual address 用户虚拟地址顶部
 #define USTACKTOP USERTOP
 #define USTACKPAGE 256                   // # of pages in user stack
 #define USTACKSIZE (USTACKPAGE * PGSIZE) // sizeof user stack

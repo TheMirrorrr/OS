@@ -366,10 +366,10 @@ void exit_range(pde_t *pgdir, uintptr_t start, uintptr_t end)
 }
 /* copy_range - copy content of memory (start, end) of one process A to another
  * process B
- * @to:    the addr of process B's Page Directory
+ * @to:    the addr of process B's Page Directory 
  * @from:  the addr of process A's Page Directory
  * @share: flags to indicate to dup OR share. We just use dup method, so it
- * didn't be used.
+ * didn't be used.//标志表示重复或共享。我们只使用dup方法，所以它没有被使用。
  *
  * CALL GRAPH: copy_mm-->dup_mmap-->copy_range
  */
@@ -378,18 +378,18 @@ int copy_range(pde_t *to, pde_t *from, uintptr_t start, uintptr_t end,
 {
     assert(start % PGSIZE == 0 && end % PGSIZE == 0);
     assert(USER_ACCESS(start, end));
-    // copy content by page unit.
+    // copy content by page unit. 复制页单位的内容
     do
     {
-        // call get_pte to find process A's pte according to the addr start
+        // call get_pte to find process A's pte according to the addr start 调用 get_pte 根据地址 start 查找进程 A 的 pte
         pte_t *ptep = get_pte(from, start, 0), *nptep;
         if (ptep == NULL)
         {
             start = ROUNDDOWN(start + PTSIZE, PTSIZE);
             continue;
         }
-        // call get_pte to find process B's pte according to the addr start. If
-        // pte is NULL, just alloc a PT
+        // call get_pte to find process B's pte according to the addr start. If 调用 get_pte 根据地址 start 查找进程 B 的 pte。如果 pte 不存在，则分配一个 PT
+        // pte is NULL, just alloc a PT 
         if (*ptep & PTE_V)
         {
             if ((nptep = get_pte(to, start, 1)) == NULL)
@@ -397,14 +397,14 @@ int copy_range(pde_t *to, pde_t *from, uintptr_t start, uintptr_t end,
                 return -E_NO_MEM;
             }
             uint32_t perm = (*ptep & PTE_USER);
-            // get page from ptep
+            // get page from ptep 获取 ptep 对应的页面
             struct Page *page = pte2page(*ptep);
-            // alloc a page for process B
+            // alloc a page for process B 为进程 B 分配一个页面
             struct Page *npage = alloc_page();
             assert(page != NULL);
             assert(npage != NULL);
             int ret = 0;
-            /* LAB5:EXERCISE2 YOUR CODE
+            /* LAB5:EXERCISE2 2312823
              * replicate content of page to npage, build the map of phy addr of
              * nage with the linear addr start
              *
@@ -412,16 +412,26 @@ int copy_range(pde_t *to, pde_t *from, uintptr_t start, uintptr_t end,
              * implementation.
              * MACROs or Functions:
              *    page2kva(struct Page *page): return the kernel vritual addr of
-             * memory which page managed (SEE pmm.h)
+             * memory which page managed (SEE pmm.h) 返回 page 管理的内存的内核虚拟地址（见 pmm.h）
              *    page_insert: build the map of phy addr of an Page with the
-             * linear addr la
-             *    memcpy: typical memory copy function
+             * linear addr la  搭建一个 Page 的物理地址与线性地址 la 的映射
+             *    memcpy: typical memory copy function 典型的内存复制函数
              *
-             * (1) find src_kvaddr: the kernel virtual address of page
-             * (2) find dst_kvaddr: the kernel virtual address of npage
-             * (3) memory copy from src_kvaddr to dst_kvaddr, size is PGSIZE
-             * (4) build the map of phy addr of  nage with the linear addr start
+             * (1) find src_kvaddr: the kernel virtual address of page 寻找 src_kvaddr：页面的内核虚拟地址
+             * (2) find dst_kvaddr: the kernel virtual address of npage 寻找 dst_kvaddr：npage 的内核虚拟地址
+             * (3) memory copy from src_kvaddr to dst_kvaddr, size is PGSIZE 内存从 src_kvaddr 复制到 dst_kvaddr，大小为 PGSIZE
+             * (4) build the map of phy addr of  nage with the linear addr start 为线性地址 start 构建 nage 的物理地址映射
              */
+            if(share){
+                ret |= page_insert(to, page, start, perm & ~PTE_W);
+                ret |= page_insert(from, page, start, perm & ~PTE_W);
+            }
+            else{
+                uintptr_t* src_kvaddr = page2kva(page);
+                uintptr_t* dst_kvaddr = page2kva(npage);
+                memcpy((void *)dst_kvaddr, (void *)src_kvaddr, PGSIZE);
+                ret = page_insert(to, npage, start, perm);
+            }
 
             assert(ret == 0);
         }
@@ -445,8 +455,8 @@ void page_remove(pde_t *pgdir, uintptr_t la)
 // paramemters:
 //  pgdir: the kernel virtual base address of PDT
 //  page:  the Page which need to map
-//  la:    the linear address need to map
-//  perm:  the permission of this Page which is setted in related pte
+//  la:    the linear address need to map 
+//  perm:  the permission of this Page which is setted in related pte 页面的权限，设置在相关的页表项中
 // return value: always 0
 // note: PT is changed, so the TLB need to be invalidate
 int page_insert(pde_t *pgdir, struct Page *page, uintptr_t la, uint32_t perm)

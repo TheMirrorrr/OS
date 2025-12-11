@@ -127,7 +127,7 @@ void interrupt_handler(struct trapframe *tf)
         /*(1)设置下次时钟中断- clock_set_next_event()
         *(2)计数器（ticks）加一
         *(3)当计数器加到100的时候，我们会输出一个`100ticks`表示我们触发了100次时钟中断，同时打印次数（num）加一
-        * (4)判断打印次数，当打印次数为10时，调用<sbi.h>中的关机函数关机
+        *(4)判断打印次数，当打印次数为10时，调用<sbi.h>中的关机函数关机
         */
 
         /* LAB5 GRADE   YOUR CODE :  */
@@ -137,14 +137,17 @@ void interrupt_handler(struct trapframe *tf)
         *(3) 每 TICK_NUM 次中断（如 100 次），进行判断当前是否有进程正在运行，如果有则标记该进程需要被重新调度（current->need_resched）
         */
         clock_set_next_event();
-           ticks++;
-           if(ticks % TICK_NUM == 0){
-               print_ticks();
-               num++;
-               if(num == 10){
-                   sbi_shutdown();
-               }
-           }
+        ticks++;
+        if(ticks % TICK_NUM == 0){
+            /*print_ticks();
+            num++;
+            if(num == 10){
+                sbi_shutdown();
+            }*/
+            if(current != NULL){
+                current->need_resched = 1;
+            }
+        }
         break;
     case IRQ_H_TIMER:
         cprintf("Hypervisor software interrupt\n");
@@ -205,9 +208,12 @@ void exception_handler(struct trapframe *tf)
     case CAUSE_STORE_ACCESS:
         cprintf("Store/AMO access fault\n");
         break;
-    case CAUSE_USER_ECALL:
+    case CAUSE_USER_ECALL: //通过中断帧里 scause寄存器的数值，判断出当前是来自USER_ECALL的异常
         // cprintf("Environment call from U-mode\n");
         tf->epc += 4;
+        //sepc寄存器是产生异常的指令的位置，在异常处理结束后，会回到sepc的位置继续执行
+        //对于ecall, 我们希望sepc寄存器要指向产生异常的指令(ecall)的下一条指令
+        //否则就会回到ecall执行再执行一次ecall, 无限循环
         syscall();
         break;
     case CAUSE_SUPERVISOR_ECALL:
