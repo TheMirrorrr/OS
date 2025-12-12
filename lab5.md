@@ -413,3 +413,196 @@ Linux加载用户程序时，用户通过 execve 系统调用启动程序，内�
 macOS加载用户程序时与Linux类似。
 
 区别在于ucore在内核初始化过程中就预先加载了用户程序，而不是在用户请求时才加载。这种设计简化了系统的启动过程，但可能会占用更多的内存资源，因为所有预定义的用户程序都会被加载到内存中。
+
+# Lab5 分支任务：gdb 调试系统调用以及返回
+
+## 1. 实验概述
+本实验旨在利用“双重 GDB”调试技术（Kernel GDB + Host GDB），深入观察 RISC-V 架构下用户态与内核态切换的关键指令 `ecall` 和 `sret` 的执行流程。通过监控 QEMU 模拟器的行为，验证硬件异常处理机制，并理解 QEMU 的 TCG 指令翻译原理。
+
+## 2. 双重 GDB 调试流程
+
+### 2.1 环境准备与符号加载
+首先启动 QEMU 调试模式 (`make debug`)。在 Kernel GDB 中，为了能调试用户态程序，我们需要手动加载用户程序的符号表：
+```gdb
+add-symbol-file obj/__user_exit.out
+```
+随后在 `user/libs/syscall.c` 的 `syscall` 函数处设置断点。
+
+### 2.2 Host GDB 的“透视”尝试（遇到的挑战）
+为了观察 QEMU 如何处理指令，我们尝试开启第二个终端，使用 Host GDB 附加到 QEMU 进程：
+```bash
+sudo gdb -p $(pgrep qemu)
+```
+**现象**：连接成功，但查看调用栈时发现 QEMU 二进制文件缺少调试符号（Debug Symbols），栈帧显示为 `??`。
+
+![Host GDB 无符号](./images/lab5-b-1.png)
+*图1：Host GDB 附加到 QEMU 进程，显示无调试符号*
+
+这迫使我们调整策略：无法直接在 QEMU 源码函数（如 `riscv_raise_exception`）打断点，转而通过 Kernel GDB 观察寄存器状态变化来验证 QEMU 的行为。
+
+### 2.3 追踪 `ecall`：用户态 -> 内核态
+在 Kernel GDB 中单步执行到 `ecall` 指令前，记录当前状态。执行 `si` 单步指令后，观察寄存器变化：
+
+![ecall 触发](./images/lab5-b-2.png)
+*图2：执行 ecall 后，scause 变为 8，sepc 记录了 ecall 地址*
+
+**观察结果**：
+1.  `scause` 寄存器变为 `0x8` (User environment call)，证明 QEMU 正确捕获了系统调用异常。
+2.  `sepc` 寄存器记录了异常发生时的指令地址 `0x800104`。
+3.  `pc` 指针跳转到了内核陷阱处理入口 `__alltraps`。
+
+### 2.4 追踪 `sret`：内核态 -> 用户态
+继续执行直到 `kern/trap/trapentry.S` 中的 `__trapret` 阶段。单步执行 `sret` 指令：
+
+![sret 返回](./images/lab5-b-3.png)
+*图3：执行 sret 后，pc 指针正确跳回用户程序*
+
+**观察结果**：
+`pc` 指针从内核高地址瞬间跳回了用户空间的 `0x800108`（即 `ecall` 的下一条指令），证明特权级和上下文已成功恢复。
+
+## 3. QEMU 原理分析：TCG 与指令翻译
+
+### 3.1 ecall 与 sret 的处理逻辑
+在 QEMU 源码中（虽然本次实验因缺失符号未直接断点，但结合理论分析）：
+*   **`ecall`**：被 TCG (Tiny Code Generator) 翻译为调用辅助函数（Helper Function）。该函数会设置 `scause`、`sepc` 等 CSR 寄存器，并将 `pc` 更新为 `stvec` 的值，模拟硬件的中断跳转。
+*   **`sret`**：同样被翻译为辅助函数。它读取 `sepc` 的值赋给 `pc`，并根据 `sstatus.SPP` 恢复特权级（从 S 模式切回 U 模式）。
+
+### 3.2 TCG Translation (指令翻译)
+QEMU 不像简单的解释器那样逐条解释指令，而是使用 TCG 将目标机器（RISC-V）的基本块（Basic Block）动态翻译成宿主机（x86_64）的机器码。
+*   **双重 GDB 的关联**：当我们用 Host GDB 暂停 QEMU 时，我们实际上是暂停了宿主机的执行流。如果 QEMU 正在执行翻译好的代码块，我们看到的调用栈往往停在 `cpu_exec` 或 `tcg_qemu_tb_exec` 等核心循环中。本次实验中看到的 `ppoll` 说明 QEMU 当时处于空闲等待状态。
+
+## 4. 实验中的“抓马”细节与知识点
+
+1.  **权限的“闭门羹”**：
+    起初尝试 `gdb -p` 时报错 `ptrace: Operation not permitted`。这是 Linux 的 YAMA 安全机制在作祟，禁止非父子进程调试。解决方法是加上 `sudo`。
+
+2.  **死锁危机 (Deadlock)**：
+    当 Host GDB 暂停 QEMU 进程后，Kernel GDB 发送的指令无法得到响应，报错 `Ignoring packet error`。
+    **知识点**：调试器与被调试程序是 C/S 架构。服务端（QEMU）被挂起时，客户端（Kernel GDB）会超时。必须在 Host GDB 中 `detach` 释放进程，或者在 Kernel GDB 设置 `set remotetimeout unlimited`。
+
+3.  **消失的符号**：
+    最“抓马”的是发现 QEMU 是 stripped binary。这打破了原本“在 QEMU 源码打断点”的计划。但这也让我们学会了通过观察硬件状态（寄存器）来反推模拟器行为的“黑盒调试法”。
+
+## 5. 大模型辅助记录
+
+在本次实验中，GitHub Copilot (Gemini 3 Pro) 提供了关键支持：
+
+**场景 1：双 GDB 死锁**
+*   **问题**：Host GDB attach 后，Kernel GDB 无法单步调试。
+*   **交互**：模型指出这是因为 QEMU 进程被挂起，导致 RSP 协议超时。模型建议在 Host GDB 操作完后立即 `detach`，并在 Kernel GDB 设置超时忽略。
+
+**场景 2：QEMU 无符号的应对**
+*   **问题**：无法在 `riscv_raise_exception` 打断点。
+*   **交互**：模型迅速调整方案，建议我放弃源码断点，转为在 Kernel GDB 中通过 `p/x $scause` 和 `p/x $sepc` 来验证 `ecall` 的执行效果。这种灵活的变通保证了实验报告的完整性。
+
+**场景 3：用户态断点设置**
+*   **问题**：`break syscall` 总是断在内核函数。
+*   **交互**：模型提醒我 `syscall` 函数在用户库和内核中同名，指导我使用 `break user/libs/syscall.c:syscall` 精确指定断点位置。
+
+## 7. 原理分析：用户态与内核态的切换机制
+
+通过阅读 `kern/trap/trapentry.S` 和相关源码，我们可以深入理解 ucore 中用户态与内核态切换的具体实现。
+
+### 7.1 用户态 -> 内核态 (Trap Entry)
+当用户程序执行 `ecall` 指令发起系统调用时，硬件和软件共同协作完成了特权级的切换。
+
+1.  **硬件自动操作**：
+    *   **更新 CSR**：硬件将异常原因写入 `scause`（系统调用为 8），将当前指令地址写入 `sepc`，将当前特权级（User）保存到 `sstatus.SPP`。
+    *   **跳转**：硬件将 `pc` 设置为 `stvec` 寄存器的值。在 `kern/trap/trap.c` 的 `idt_init` 中，`stvec` 被设置为 `__alltraps` 的地址。
+
+2.  **软件保存上下文 (`__alltraps`)**：
+    *   **栈切换 (Stack Swap)**：
+        ```asm
+        csrrw sp, sscratch, sp
+        bnez sp, _save_context
+        ```
+        这是最关键的一步。在用户态运行时，`sscratch` 寄存器保存了**内核栈指针 (Kernel Stack Pointer)**。
+        *   `csrrw` 指令交换了 `sp` 和 `sscratch`。此时，`sp` 指向了内核栈，而 `sscratch` 保存了刚才的用户栈指针。
+        *   如果是从内核态重入（Nested Trap），`sscratch` 为 0，交换后 `sp` 为 0。代码通过 `bnez` 检查并处理这种情况，确保始终使用正确的内核栈。
+    *   **保存寄存器**：
+        接下来，代码通过 `STORE` 指令将所有通用寄存器（x1-x31）压入内核栈，构建 `trapframe` 结构体。
+        特别地，它将 `sscratch`（此时保存着用户栈指针）的值读出并保存到 `trapframe` 的 `sp` 位置，确保用户栈信息不丢失。
+    *   **调用处理函数**：
+        最后，将 `sp`（指向 `trapframe` 的首地址）作为参数传递给 `a0`，并调用 `trap` 函数进行分发处理。
+
+### 7.2 内核态 -> 用户态 (Trap Return)
+当系统调用处理完毕（如 `syscall` 返回），内核调用 `__trapret` 恢复上下文并返回用户态。
+
+1.  **软件恢复上下文 (`__trapret`)**：
+    *   **恢复 CSR**：从栈中弹出 `sstatus` 和 `sepc` 的值，并写入对应寄存器。`sstatus` 中的 `SPP` 位此时应为 0（代表用户态）。
+    *   **保存内核栈指针**：
+        ```asm
+        addi s0, sp, 36 * REGBYTES
+        csrw sscratch, s0
+        ```
+        在切回用户态之前，内核必须把当前的内核栈顶地址保存回 `sscratch` 寄存器。这样，下一次发生中断或系统调用时，硬件才能找到内核栈。
+    *   **恢复通用寄存器**：
+        使用 `LOAD` 指令从 `trapframe` 中恢复所有通用寄存器。
+        **关键点**：最后一步恢复 `sp` 寄存器 (`LOAD x2, ...`)。这将 `sp` 重新指向了用户栈。
+
+2.  **硬件执行返回 (`sret`)**：
+    *   执行 `sret` 指令时，CPU 会：
+        *   将 `pc` 设置为 `sepc` 的值（即 `ecall` 的下一条指令地址）。
+        *   根据 `sstatus.SPP` 切换特权级（回到 User Mode）。
+        *   根据 `sstatus.SPIE` 恢复中断使能状态。
+
+通过这种机制，ucore 保证了用户程序和内核程序拥有独立的栈空间，并且在切换过程中能够完整地保存和恢复执行现场。
+
+## 6. 附录：可复现的操作命令清单
+
+为了方便复现本次实验，以下整理了三个终端的完整操作脚本：
+
+### Terminal 1: 启动 QEMU
+```bash
+cd ~/labcodes/OS/lab5
+make clean
+make
+make debug
+# 等待 GDB 连接...
+```
+
+### Terminal 2: Kernel GDB (主控制台)
+```bash
+riscv64-unknown-elf-gdb
+```
+在 GDB 内部输入：
+```gdb
+target remote :1234
+set remotetimeout unlimited       # 关键：防止 Host GDB 暂停 QEMU 时超时
+file bin/kernel
+add-symbol-file obj/__user_exit.out  # 加载用户程序符号
+break user/libs/syscall.c:syscall    # 精确断点
+continue
+
+# --- 此时程序停在 syscall 函数入口 ---
+# 输入 si 并回车，重复多次，直到看到 ecall 指令
+# 此时暂停操作，切换到 Terminal 3
+```
+
+### Terminal 3: Host GDB (观察者)
+```bash
+pgrep -a qemu   # 获取 PID，例如 12345
+sudo gdb -p 12345
+```
+在 GDB 内部输入：
+```gdb
+bt              # 查看调用栈 (截图点 1)
+detach          # 关键：释放 QEMU 进程
+quit
+```
+
+### Terminal 2: Kernel GDB (继续追踪)
+回到 Terminal 2 继续操作：
+```gdb
+# --- 验证 ecall ---
+si              # 执行 ecall
+p/x $scause     # 应为 0x8 (截图点 2)
+p/x $sepc       # 应为 ecall 地址
+
+# --- 验证 sret ---
+break __trapret
+continue
+# 输入 si 重复多次，直到看到 sret 指令
+si              # 执行 sret
+x/i $pc         # 验证是否回到用户地址 (截图点 3)
+```
