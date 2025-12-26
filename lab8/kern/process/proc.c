@@ -126,7 +126,7 @@ alloc_proc(void)
          *       uint32_t lab6_priority;                     // priority value (lab6 stride)
          */
 
-        //LAB8 YOUR CODE : (update LAB6 steps)
+        //LAB8 2312823 : (update LAB6 steps)
         /*
          * below fields(add in LAB6) in proc_struct need to be initialized
          *       struct files_struct * filesp;                file struct point        
@@ -153,7 +153,9 @@ alloc_proc(void)
         proc->lab6_stride = 0;
         proc->lab6_priority = 0;
 
-        
+        // lab8 add:
+        proc->filesp = NULL;
+
     }
     return proc;
 }
@@ -273,10 +275,12 @@ void proc_run(struct proc_struct *proc)
 
     lsatp(proc->pgdir);//将下一个要运行进程的 pgdir 值加载到 satp 寄存器中
 
+    flush_tlb();
+
     switch_to(&current_proc->context, &proc->context);//进行进程上下文切换，使用指针以修改原始值
 
     local_intr_restore(flag);//恢复中断状态
-    //LAB8 YOUR CODE : (update LAB4 steps)
+    //LAB8 2312823 : (update LAB4 steps)
       /*
        * below fields(add in LAB6) in proc_struct need to be initialized
        *       before switch_to();you should flush the tlb
