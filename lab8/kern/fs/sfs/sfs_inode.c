@@ -411,6 +411,54 @@ sfs_dirent_read_nolock(struct sfs_fs *sfs, struct sfs_inode *sin, int slot, stru
     return 0;
 }
 
+/*
+ * sfs_dirent_link_nolock - link the file entry in the DIR's inode
+ */
+static int
+sfs_dirent_link_nolock(struct sfs_fs *sfs, struct sfs_inode *sin, int slot, struct sfs_inode *lnksin, const char *name) {
+    int ret;
+    struct sfs_disk_entry *entry;
+    if ((entry = kmalloc(sizeof(struct sfs_disk_entry))) == NULL) {
+        return -E_NO_MEM;
+    }
+    memset(entry, 0, sizeof(struct sfs_disk_entry));
+    entry->ino = lnksin->ino;
+    strcpy(entry->name, name);
+    
+    uint32_t ino;
+    if ((ret = sfs_bmap_load_nolock(sfs, sin, slot, &ino)) != 0) {
+        kfree(entry);
+        return ret;
+    }
+    
+    ret = sfs_wbuf(sfs, entry, sizeof(struct sfs_disk_entry), ino, 0);
+    kfree(entry);
+    return ret;
+}
+
+/*
+ * sfs_dirent_unlink_nolock - unlink the file entry in the DIR's inode
+ */
+static int
+sfs_dirent_unlink_nolock(struct sfs_fs *sfs, struct sfs_inode *sin, int slot, struct sfs_inode *lnksin) {
+    int ret;
+    struct sfs_disk_entry *entry;
+    if ((entry = kmalloc(sizeof(struct sfs_disk_entry))) == NULL) {
+        return -E_NO_MEM;
+    }
+    memset(entry, 0, sizeof(struct sfs_disk_entry));
+    
+    uint32_t ino;
+    if ((ret = sfs_bmap_load_nolock(sfs, sin, slot, &ino)) != 0) {
+        kfree(entry);
+        return ret;
+    }
+    
+    ret = sfs_wbuf(sfs, entry, sizeof(struct sfs_disk_entry), ino, 0);
+    kfree(entry);
+    return ret;
+}
+
 #define sfs_dirent_link_nolock_check(sfs, sin, slot, lnksin, name)                  \
     do {                                                                            \
         int err;                                                                    \
@@ -588,17 +636,55 @@ sfs_io_nolock(struct sfs_fs *sfs, struct sfs_inode *sin, void *buf, off_t offset
     uint32_t ino;
     uint32_t blkno = offset / SFS_BLKSIZE;          // The NO. of Rd/Wr begin block
     uint32_t nblks = endpos / SFS_BLKSIZE - blkno;  // The size of Rd/Wr blocks
-
-  //LAB8:EXERCISE1 YOUR CODE HINT: call sfs_bmap_load_nolock, sfs_rbuf, sfs_rblock,etc. read different kind of blocks in file
-	/*
-	 * (1) If offset isn't aligned with the first block, Rd/Wr some content from offset to the end of the first block
-	 *       NOTICE: useful function: sfs_bmap_load_nolock, sfs_buf_op
-	 *               Rd/Wr size = (nblks != 0) ? (SFS_BLKSIZE - blkoff) : (endpos - offset)
-	 * (2) Rd/Wr aligned blocks 
-	 *       NOTICE: useful function: sfs_bmap_load_nolock, sfs_block_op
+      //LAB8:EXERCISE1 2311881 HINT: call sfs_bmap_load_nolock, sfs_rbuf, sfs_rblock,etc. read different kind of blocks in file
+    /*
+     * (1) If offset isn't aligned with the first block, Rd/Wr some content from offset to the end of the first block
+     *       NOTICE: useful function: sfs_bmap_load_nolock, sfs_buf_op
+     *               Rd/Wr size = (nblks != 0) ? (SFS_BLKSIZE - blkoff) : (endpos - offset)
+     * (2) Rd/Wr aligned blocks 
+     *       NOTICE: useful function: sfs_bmap_load_nolock, sfs_block_op
      * (3) If end position isn't aligned with the last block, Rd/Wr some content from begin to the (endpos % SFS_BLKSIZE) of the last block
 	 *       NOTICE: useful function: sfs_bmap_load_nolock, sfs_buf_op	
 	*/
+    if ((blkoff = offset % SFS_BLKSIZE) != 0) {
+        size = (nblks != 0) ? (SFS_BLKSIZE - blkoff) : (endpos - offset);
+        if ((ret = sfs_bmap_load_nolock(sfs, sin, blkno, &ino)) != 0) {
+            return ret;
+        }
+        if ((ret = sfs_buf_op(sfs, buf, size, ino, blkoff)) != 0) {
+            return ret;
+        }
+        alen += size;
+        buf += size;
+        if (nblks == 0) {
+            goto out;
+        }
+        blkno++;
+        nblks--;
+    }
+
+    while (nblks > 0) {
+        if ((ret = sfs_bmap_load_nolock(sfs, sin, blkno, &ino)) != 0) {
+            return ret;
+        }
+        if ((ret = sfs_block_op(sfs, buf, ino, 1)) != 0) {
+            return ret;
+        }
+        alen += SFS_BLKSIZE;
+        buf += SFS_BLKSIZE;
+        blkno++;
+        nblks--;
+    }
+
+    if ((size = endpos % SFS_BLKSIZE) != 0) {
+        if ((ret = sfs_bmap_load_nolock(sfs, sin, blkno, &ino)) != 0) {
+            return ret;
+        }
+        if ((ret = sfs_buf_op(sfs, buf, size, ino, 0)) != 0) {
+            return ret;
+        }
+        alen += size;
+    }
 
     
 
@@ -935,6 +1021,71 @@ out_unlock:
 }
 
 /*
+ * sfs_create - Create a file.
+ */
+static int
+sfs_create(struct inode *node, const char *name, bool excl, struct inode **node_store) {
+    struct sfs_fs *sfs = fsop_info(vop_fs(node), sfs);
+    struct sfs_inode *sin = vop_info(node, sfs_inode);
+    int ret, slot, empty_slot;
+    uint32_t ino;
+    
+    if (strlen(name) > SFS_MAX_FNAME_LEN) {
+        return -E_TOO_BIG;
+    }
+
+    lock_sin(sin);
+    ret = sfs_dirent_search_nolock(sfs, sin, name, &ino, &slot, &empty_slot);
+    if (ret == -E_NOENT) {
+        // create new file
+        if ((ret = sfs_block_alloc(sfs, &ino)) != 0) {
+            goto out;
+        }
+        struct sfs_disk_inode *din = kmalloc(sizeof(struct sfs_disk_inode));
+        if (din == NULL) {
+            sfs_block_free(sfs, ino);
+            ret = -E_NO_MEM;
+            goto out;
+        }
+        memset(din, 0, sizeof(struct sfs_disk_inode));
+        din->type = SFS_TYPE_FILE;
+        din->nlinks = 1;
+        ret = sfs_wbuf(sfs, din, sizeof(struct sfs_disk_inode), ino, 0);
+        kfree(din);
+        if (ret != 0) {
+            sfs_block_free(sfs, ino);
+            goto out;
+        }
+        
+        struct inode *newnode;
+        if ((ret = sfs_load_inode(sfs, &newnode, ino)) != 0) {
+            sfs_block_free(sfs, ino);
+            goto out;
+        }
+        
+        struct sfs_inode *new_sin = vop_info(newnode, sfs_inode);
+        if ((ret = sfs_dirent_link_nolock(sfs, sin, empty_slot, new_sin, name)) != 0) {
+             vop_ref_dec(newnode);
+             goto out;
+        }
+        
+        *node_store = newnode;
+        ret = 0;
+    } else if (ret == 0) {
+        if (excl) {
+            ret = -E_EXISTS;
+            goto out;
+        }
+        if ((ret = sfs_load_inode(sfs, node_store, ino)) != 0) {
+            goto out;
+        }
+    }
+out:
+    unlock_sin(sin);
+    return ret;
+}
+
+/*
  * sfs_lookup - Parse path relative to the passed directory
  *              DIR, and hand back the inode for the file it
  *              refers to.
@@ -972,6 +1123,7 @@ static const struct inode_ops sfs_node_dirops = {
     .vop_reclaim                    = sfs_reclaim,
     .vop_gettype                    = sfs_gettype,
     .vop_lookup                     = sfs_lookup,
+    .vop_create                     = sfs_create,
 };
 /// The sfs specific FILE operations correspond to the abstract operations on a inode.
 static const struct inode_ops sfs_node_fileops = {
