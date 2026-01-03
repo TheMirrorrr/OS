@@ -158,3 +158,99 @@ $ exit
 *   `exit`：Shell 可能会提示退出或重启。
 
 ![运行复杂测试或退出](../images/lab8-3.png)
+
+# 扩展练习 Challenge1：完成基于“UNIX的PIPE机制”的设计方案
+## 实验要求
+如果要在ucore里加入UNIX的管道（Pipe）机制，至少需要定义哪些数据结构和接口？（接口给出语义即可，不必具体实现。数据结构的设计应当给出一个（或多个）具体的C语言struct定义。在网络上查找相关的Linux资料和实现，请在实验报告中给出设计实现”UNIX的PIPE机制“的概要设方案，你的设计应当体现出对可能出现的同步互斥问题的处理。）
+
+## 设计方案
+参考资料：
+1. 【Linux进程间通信】二、pipe管道 https://www.cnblogs.com/mindtechnist/p/17243750.html
+2.  AI
+### 数据结构设计
+- 管道缓冲区控制块
+```c
+#define PIPE_BUF_SIZE 4096  // 管道默认缓冲区大小
+
+typedef struct pipe_buf {
+    char data[PIPE_BUF_SIZE]; // 环形缓冲区
+    int head;                 // 下一个读位置
+    int tail;                 // 下一个写位置
+    int cnt;                  // 当前缓冲区字节数
+} pipe_buf_t;
+```
+- 管道对象结构
+```c
+typedef struct pipe {
+    pipe_buf_t buf;        // 管道缓冲区控制块
+
+    int ref_read;          // 读端引用计数
+    int ref_write;         // 写端引用计数
+
+    // 同步互斥对象
+    spinlock_t lock;       // 保护管道状态的自旋锁
+    wait_queue_t wait_read;  // 读等待队列
+    wait_queue_t wait_write; // 写等待队列
+
+    bool closed_read;      // 读端是否已关闭
+    bool closed_write;     // 写端是否已关闭
+} pipe_t;
+```
+- 管道文件描述符封装
+```c
+typedef struct file {
+    file_ops_t *f_ops;  // 指向对应的读/写操作接口
+    pipe_t *pipe;       // 指向管道对象
+    int mode;           // FMODE_READ 或 FMODE_WRITE
+} pipe_file_t;
+```
+
+### 接口设计
+- 创建管道
+```c
+int pipe_create(int pipefd[2]);
+```
+创建一个新的 pipe_t 管道对象
+
+- 管道读操作
+```c
+ssize_t pipe_read(pipe_t *p, char *buf, size_t count);
+```
+从管道 p 中读取最多 count 字节到用户缓冲区 buf
+
+- 管道写操作
+```c
+ssize_t pipe_write(pipe_t *p, const char *buf, size_t count);
+```
+将最多 count 字节写入管道 p，
+
+- 管道关闭（读/写端分开）
+```c
+int pipe_close_read(pipe_t *p);
+int pipe_close_write(pipe_t *p);
+```
+在文件描述符关闭时减少对应引用计数
+
+### 同步互斥问题
+1.互斥访问缓冲区
+- 采用 自旋锁（spinlock） 对管道控制块加锁，保护对 head／tail／count／队列的修改。
+
+2.阻塞与唤醒机制
+- 使用内核等待队列实现阻塞与唤醒操作。当缓冲空时读阻塞；缓冲满时写阻塞。
+- 其他端写入或读取数据后应唤醒相应等待队列。
+
+3.引用计数避免早释放
+- 当读写端引用计数 >0 时，保持管道实例。一旦所有引用消失才释放。
+
+### 工作原理
+1.父进程调用pipe()函数创建管道，并得到指向管道读端和写端的文件描述符fd[0]和fd[1]。创建出来的管道实际上是内核的一块缓冲区，我们可以像读写文件一样来操作这个缓冲区，所以也可以把他理解为一个伪文件。
+
+![trap1](./images/pipe1.png)
+
+2.父进程调用fork()创建子进程，子进程将共享这两个指向管道读写端的文件描述符。
+
+![trap1](./images/pipe2.png)
+
+3.如果父进程关闭管道读端，子进程关闭管道写端，此时父进程可以向管道中写入数据，子进程将管道中的数据读出，反之同理。由于管道是利用环形队列实现的，数据从写端流入管道，从读端流出，这样就实现了进程间通信。
+
+![trap1](./images/pipe3.png)
