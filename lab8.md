@@ -1,3 +1,118 @@
+# 练习1: 完成读文件操作的实现（需要编码）
+
+## 1. 实验要求
+
+首先了解打开文件的处理流程，然后参考本实验后续的文件读写操作的过程分析，填写在 `kern/fs/sfs/sfs_inode.c` 中的 `sfs_io_nolock()` 函数，实现读文件中数据的代码。
+
+## 2. 设计思路与实现
+
+`sfs_io_nolock` 是 SFS 文件系统中进行文件读写操作的底层核心函数（不带锁）。由于文件数据在磁盘上是以块（Block，通常为 4096 字节）为单位存储的，而用户的读写请求可能从任意偏移量开始，长度也任意，因此需要分三种情况处理：
+
+1.  **起始的不对齐部分**：如果读写的起始偏移量 `offset` 没有对齐到块边界，需要先处理第一块中从 `offset` 到块末尾（或结束位置）的数据。
+2.  **中间的对齐块**：对于中间完整的块，可以直接以块为单位进行读写，效率更高。
+3.  **末尾的不对齐部分**：如果结束位置 `endpos` 没有对齐到块边界，需要处理最后一块中从块开始到 `endpos` 的数据。
+
+### 代码实现
+
+在 `kern/fs/sfs/sfs_inode.c` 中，`sfs_io_nolock` 函数的实现如下：
+
+```c
+static int
+sfs_io_nolock(struct sfs_fs *sfs, struct sfs_inode *sin, void *buf, off_t offset, size_t *alenp, bool write) {
+    // ... (省略前面的变量定义和边界检查代码) ...
+
+    int (*sfs_buf_op)(struct sfs_fs *sfs, void *buf, size_t len, uint32_t blkno, off_t offset);
+    int (*sfs_block_op)(struct sfs_fs *sfs, void *buf, uint32_t blkno, uint32_t nblks);
+    if (write) {
+        sfs_buf_op = sfs_wbuf, sfs_block_op = sfs_wblock;
+    }
+    else {
+        sfs_buf_op = sfs_rbuf, sfs_block_op = sfs_rblock;
+    }
+
+    int ret = 0;
+    size_t size, alen = 0;
+    uint32_t ino;
+    uint32_t blkno = offset / SFS_BLKSIZE;          // The NO. of Rd/Wr begin block
+    uint32_t nblks = endpos / SFS_BLKSIZE - blkno;  // The size of Rd/Wr blocks
+
+    // LAB8:EXERCISE1 YOUR CODE
+    
+    /* 第一步：处理起始的不对齐部分 */
+    if ((blkoff = offset % SFS_BLKSIZE) != 0) {
+        // 计算第一块需要读写的大小
+        size = (nblks != 0) ? (SFS_BLKSIZE - blkoff) : (endpos - offset);
+        
+        // 获取对应逻辑块号 blkno 的磁盘块号 ino
+        if ((ret = sfs_bmap_load_nolock(sfs, sin, blkno, &ino)) != 0) {
+            return ret;
+        }
+        // 读/写数据
+        if ((ret = sfs_buf_op(sfs, buf, size, ino, blkoff)) != 0) {
+            return ret;
+        }
+        
+        // 更新已处理长度和缓冲区指针
+        alen += size;
+        buf += size;
+        
+        // 如果只在这一块内就结束了，直接跳转到 out
+        if (nblks == 0) {
+            goto out;
+        }
+        
+        // 移动到下一块
+        blkno++;
+        nblks--;
+    }
+
+    /* 第二步：处理中间的对齐块 */
+    while (nblks > 0) {
+        // 获取磁盘块号
+        if ((ret = sfs_bmap_load_nolock(sfs, sin, blkno, &ino)) != 0) {
+            return ret;
+        }
+        // 读/写整个块
+        if ((ret = sfs_block_op(sfs, buf, ino, 1)) != 0) {
+            return ret;
+        }
+        
+        // 更新变量
+        alen += SFS_BLKSIZE;
+        buf += SFS_BLKSIZE;
+        blkno++;
+        nblks--;
+    }
+
+    /* 第三步：处理末尾的不对齐部分 */
+    if ((size = endpos % SFS_BLKSIZE) != 0) {
+        // 获取磁盘块号
+        if ((ret = sfs_bmap_load_nolock(sfs, sin, blkno, &ino)) != 0) {
+            return ret;
+        }
+        // 读/写剩余数据
+        if ((ret = sfs_buf_op(sfs, buf, size, ino, 0)) != 0) {
+            return ret;
+        }
+        alen += size;
+    }
+
+out:
+    *alenp = alen;
+    if (offset + alen > sin->din->size) {
+        sin->din->size = offset + alen;
+        sin->dirty = 1;
+    }
+    return ret;
+}
+```
+
+## 3. 关键函数分析
+
+*   **`sfs_bmap_load_nolock`**: 这是文件系统索引的核心，它负责查找文件逻辑块对应的物理磁盘块。如果是写操作且块不存在，它还会负责分配新的磁盘块。
+*   **`sfs_buf_op` (指向 `sfs_rbuf` 或 `sfs_wbuf`)**: 处理块内的部分读写，需要指定块内的偏移量。
+*   **`sfs_block_op` (指向 `sfs_rblock` 或 `sfs_wblock`)**: 处理整块的读写，直接操作缓冲区。
+
 # 练习2: 完成基于文件系统的执行程序机制的实现
 
 ## 1. 设计原理与函数介绍
