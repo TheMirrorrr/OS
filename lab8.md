@@ -118,9 +118,9 @@ if (copy_files(clone_flags, proc) != 0) { // 复制文件描述符表
 
 ## 3. 实验步骤与截图复现
 
-为了复现 `/home/root2/labcodes/OS/images/` 目录下的 `lab8-1` 到 `lab8-3` 图片（假设分别对应启动、运行程序、退出等场景），请执行以下步骤：
+为了复现 `/home/root2/labcodes/OS/images/` 目录下的 `lab8-1` 到 `lab8-3` （分别对应启动、运行程序、退出场景），需要执行以下步骤：
 
-### 步骤 1: 编译并运行内核 (对应 lab8-1)
+### 步骤 1: 编译并运行内核 
 在终端中执行：
 ```bash
 make qemu
@@ -130,7 +130,7 @@ make qemu
 
 ![Shell 启动界面](../images/lab8-1.png)
 
-### 步骤 2: 运行用户程序 hello (对应 lab8-2)
+### 步骤 2: 运行用户程序 hello 
 在 Shell 提示符下输入：
 ```bash
 $ hello
@@ -144,17 +144,12 @@ Hello world!!
 
 ![运行 hello 程序](../images/lab8-2.png)
 
-### 步骤 3: 运行 forktest 或 exit (对应 lab8-3)
+### 步骤 3: 运行 exit 
 在 Shell 提示符下输入：
-```bash
-$ forktest
-```
-或者测试退出：
 ```bash
 $ exit
 ```
 **预期结果**：
-*   `forktest`：输出一系列 `I am child ...`，最后显示 `forktest pass.`。这证明进程管理（fork/wait）与文件系统的结合是稳定的。
 *   `exit`：Shell 可能会提示退出或重启。
 
 ![运行复杂测试或退出](../images/lab8-3.png)
