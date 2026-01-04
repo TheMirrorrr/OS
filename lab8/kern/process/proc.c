@@ -721,13 +721,16 @@ load_icode(int fd, int argc, char **kargv)
     struct proghdr __ph, *ph = &__ph;
     int ret = -E_NO_MEM;
 
+    // (1) 创建新的 mm 结构体
     if ((mm = mm_create()) == NULL) {
-        goto bad_mm;
+        goto bad_mm;  // 创建失败就跳转到错误处理
     }
+    // (2) 为 mm 分配并复制内核页表，建立独立页目录
     if (setup_pgdir(mm) != 0) {
         goto bad_pgdir_cleanup_mm;
     }
 
+    // (3.1) 读取 ELF 头并校验魔数
     if ((ret = load_icode_read(fd, elf, sizeof(struct elfhdr), 0)) != 0) {
         goto bad_elf_cleanup_pgdir;
     }
@@ -737,11 +740,13 @@ load_icode(int fd, int argc, char **kargv)
         goto bad_elf_cleanup_pgdir;
     }
 
-    struct Page *page;
+    struct Page *page = NULL;
     uint32_t vm_flags, perm;
     struct proghdr *ph_end = ph + elf->e_phnum;
 
-    for (int i = 0; i < elf->e_phnum; i ++) {
+    // (3.2) 遍历每个可加载段，建立 VMA 并装载文本/数据，清零 BSS
+    for (int i = 0; i < elf->e_phnum; i++) {
+        // 读取程序头（每个段的信息）
         off_t phoff = elf->e_phoff + sizeof(struct proghdr) * i;
         if ((ret = load_icode_read(fd, ph, sizeof(struct proghdr), phoff)) != 0) {
             goto bad_cleanup_mmap;
@@ -764,6 +769,7 @@ load_icode(int fd, int argc, char **kargv)
         if (vm_flags & VM_WRITE) perm |= PTE_W;
         if (vm_flags & VM_EXEC) perm |= PTE_X;
 
+        // 为段建立虚拟区间
         if ((ret = mm_map(mm, ph->p_va, ph->p_memsz, vm_flags, NULL)) != 0) {
             goto bad_cleanup_mmap;
         }
@@ -772,6 +778,7 @@ load_icode(int fd, int argc, char **kargv)
         off_t offset = ph->p_offset;
 
         end = ph->p_va + ph->p_filesz;
+        // 将文件内容逐页读入物理页
         while (start < end) {
             if ((page = pgdir_alloc_page(mm->pgdir, la, perm)) == NULL) {
                 ret = -E_NO_MEM;
@@ -804,6 +811,7 @@ load_icode(int fd, int argc, char **kargv)
                 start = la;
             }
         }
+        // 为 BSS 分配页并清零
         while (start < end) {
             if ((page = pgdir_alloc_page(mm->pgdir, la, perm)) == NULL) {
                 ret = -E_NO_MEM;
@@ -821,6 +829,7 @@ load_icode(int fd, int argc, char **kargv)
     }
     
     vm_flags = VM_READ | VM_WRITE | VM_STACK;
+    // (4) 建立用户栈的 VMA 并分配栈页
     if ((ret = mm_map(mm, USTACKTOP - USTACKSIZE, USTACKSIZE, vm_flags, NULL)) != 0) {
         goto bad_cleanup_mmap;
     }
@@ -829,6 +838,7 @@ load_icode(int fd, int argc, char **kargv)
     assert(pgdir_alloc_page(mm->pgdir, USTACKTOP-3*PGSIZE , PTE_USER) != NULL);
     assert(pgdir_alloc_page(mm->pgdir, USTACKTOP-4*PGSIZE , PTE_USER) != NULL);
     
+    // (5) 绑定新的地址空间并切换 satp
     mm_count_inc(mm);
     current->mm = mm;
     current->pgdir = PADDR(mm->pgdir);
@@ -837,6 +847,7 @@ load_icode(int fd, int argc, char **kargv)
     uintptr_t argv_base[EXEC_MAX_ARG_NUM];
     uintptr_t sp = USTACKTOP;
     
+    // (6) 将 argv 字符串拷贝到用户栈，记录指针
     for (int i = 0; i < argc; i ++) {
         int len = strlen(kargv[i]) + 1;
         sp -= len;
@@ -846,6 +857,7 @@ load_icode(int fd, int argc, char **kargv)
     
     sp = sp & (~(sizeof(uintptr_t) - 1));
     
+    // 压入 NULL 终止符与 argv 指针数组
     sp -= sizeof(uintptr_t);
     *(uintptr_t *)sp = 0;
     
@@ -856,9 +868,11 @@ load_icode(int fd, int argc, char **kargv)
     
     uintptr_t argv_ptr = sp;
     
+    // 压入 argc
     sp -= sizeof(uintptr_t);
     *(int *)sp = argc;
     
+    // (7) 准备用户态 trapframe：入口、栈指针、状态、参数寄存器
     struct trapframe *tf = current->tf;
     uintptr_t sstatus = tf->status;
     memset(tf, 0, sizeof(struct trapframe));
